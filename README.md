@@ -2,6 +2,8 @@
 
 ![Go](https://img.shields.io/badge/Go-1.23.4%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+[![Build Go application](https://github.com/zealsprince/wrappers/actions/workflows/go-build.yml/badge.svg)](https://github.com/zealsprince/wrappers/actions/workflows/go-build.yml)
+[![Test Go application](https://github.com/zealsprince/wrappers/actions/workflows/go-test.yml/badge.svg)](https://github.com/zealsprince/wrappers/actions/workflows/go-test.yml)
 
 Wrappers is a versatile and extensible library for Go that provides a comprehensive validation layer for struct fields. By leveraging generic wrappers and regex-based validations, it ensures type safety, data integrity, and streamlined JSON marshalling/unmarshalling.
 
@@ -30,7 +32,7 @@ type User struct {
 func main() {
     // Unmarshal JSON data into a User struct.
     var user User
-    err := json.Unmarshal([]byte(`{"id": 1, "name": "Alice", "email": "example@test.com"}`), &user)
+    err := json.Unmarshal([]byte(`{"id": "1", "name": "Alice", "email": "example@test.com"}`), &user)
     if err != nil {
         panic(err)
     }
@@ -40,11 +42,15 @@ func main() {
         return errors.New("Invalid email address")
     }
 
-    // Perform additional checks on the user's ID and name.
-    if user.ID < 0 {
+    // Validate the user's ID. It comes as a string, but our code will work with integers.
+    id, err := strconv.ParseInt(user.ID, 10, 64)
+    if err != nil {
+        return errors.New("Invalid user ID")
+    } else if id <= 0 {
         return errors.New("Invalid user ID")
     }
 
+    // Validate the user's name. Can't be empty!
     if user.Name == "" {
         return errors.New("Invalid user name")
     }
@@ -75,23 +81,33 @@ func main() {
     // Plus, if you want to marshal it back to JSON, it will be the same as the input!
 ```
 
+You can chose to discard values without raising errors
+
 ## Overview
 
 The wrappers package provides a structured approach to manage and validate various data types in Go through encapsulation in dedicated wrapper types.
 
-1. Wrapping: Each wrapper type (e.g., WrapperInt, WrapperString) allows elementary values to be stored safely as any implementing type. The Wrap method performs validation on the input, ensuring that only acceptable values are assigned. If the input is invalid, the wrapper can either return an error or discard the value based on the method parameters.
+### On their own
 
-2. Discarding: This process happens whenever the wrapped data fails the validation. A discard operation always flags a wrapper as discarded which further processes can refer to. It then nullifies its value to the default value for that type. Normally, this also throws an error during Wrapping or Unmarshalling processes. However, wrapping takes an optional `discard` boolean parameter which will cause errors to be dropped but still discard the value.
+**Wrapping**: Each wrapper type (e.g., WrapperInt, WrapperString) allows elementary values to be stored safely as any implementing type. The Wrap method performs validation on the input, ensuring that only acceptable values are assigned. If the input is invalid, the wrapper can either return an error or discard the value based on the method parameters.
 
-3. Unwrapping: The Unwrap method retrieves the stored value from the wrapper. If the value is marked as discarded, a default value (e.g., 0 for integers) is returned, helping to maintain clarity about the data's state.
+**Discarding**: This process happens whenever the wrapped data fails the validation. A discard operation always flags a wrapper as discarded which further processes can refer to. It then nullifies its value to the default value for that type. Normally, this also throws an error during Wrapping or Unmarshalling processes.
 
-Within data structures:
+>[!TIP]
+> Wrapping takes an optional `discard` boolean parameter which will cause errors to be dropped but still discard the value. For unmarshalling processes, the `Discarder` type can be used to suppress errors and discard values silently.
 
-- Marshalling: The MarshalJSON method enables wrappers to be serialized into JSON format. When a struct containing wrappers is marshalled, discarded values are serialized as null or omitted (if marked with omitempty and nilled), ensuring accurate representation.
+**Unwrapping**: The Unwrap method retrieves the stored value from the wrapper. If the value is marked as discarded, a default value (e.g., 0 for integers) is returned, helping to maintain clarity about the data's state.
 
-- Unmarshalling: The UnmarshalJSON method allows JSON data to populate the corresponding wrappers. It validates the incoming data, storing values if they fit the expected format or discarding them otherwise, while also handling errors appropriately.
+### Within data structures
 
-### Sub-packages
+**Marshalling**: The MarshalJSON method enables wrappers to be serialized into JSON format. When a struct containing wrappers is marshalled, discarded values are serialized as null or omitted (if marked with omitempty and nilled), ensuring accurate representation.
+
+> [!WARNING]
+> This requires further handling to ensure no erroneous data is processed. It is generally recommended - especially during unmarshalling - to handle the unmarshal errors and not proceed with invalid data.
+
+**Unmarshalling**: The UnmarshalJSON method allows JSON data to populate the corresponding wrappers. It validates the incoming data, storing values if they fit the expected format or discarding them otherwise, while also handling errors appropriately.
+
+## Sub-packages
 
 Wrappers ships with two additional sub-packages that enable further every day usage:
 
@@ -235,6 +251,10 @@ Just like with normal structs, adding `,omitempty` will remove the value from th
 
 The Discarder type is used to suppress errors during JSON unmarshalling, allowing for automatic handling of invalid values without raising errors.
 
+Keep in mind, this scenario assumes that you will have to check if the value was discarded or not before proceeding with further operations.
+
+**It is safest to simply handle the Unmarshal error and not proceed with the data if it is invalid.**
+
 ```go
 // [...] package and imports
 
@@ -259,8 +279,9 @@ func main() {
     // Same in this case, except this time the result is discarded.
     json.Unmarshal([]byte(invalidData), &nested)
     
-    fmt.Println("Discarded value, unwrapped result:", nested.Value.Proxy.Unwrap())
-    // (string) ""
+    // Your further code can now check if the value was discarded.
+    fmt.Printf("Discarded: %v / Unwrapped result: %v\n", nested.Value.Proxy.IsDiscarded(), nested.Value.Proxy.Unwrap())
+    // Discarded: true / Unwrapped result: ""
 }
 ```
 
