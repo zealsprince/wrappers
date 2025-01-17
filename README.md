@@ -319,7 +319,7 @@ To implement a completely new typed wrapper, please refer to the existing implem
 
 ## Motivations
 
-I conceived the idea of this library while working at [Savages Corp](https://github.com/savages-corp) building our [Data Layer](https://data-layer.com/) project. One of my daily activities while writing integrations was matching API data structures and having to validate each and every field after unmarshalling to structs. A problem that kept repeating itself is data validation. Generally, you will unmarshal to a struct and then have to step through the fields to make sure everything is fine and no one on the integration side (especially in direct customer managed environments) has changed. This leads to a cumbersome cat-and-mouse game of constantly catching up and fixing bugs time and time again.
+I conceived the idea of this library while working at [Savages Corp](https://github.com/savages-corp) building our [Data Layer](https://data-layer.com/) project. One of my daily activities while writing integrations was matching API data structures and having to validate each and every field after unmarshalling to structs. A problem that kept repeating itself is data validation. Generally, you will unmarshal to a struct and then have to step through the fields to make sure everything is fine and no one on the integration side (especially in direct customer managed environments) has inevitably changed a field's type, format or structure. This leads to a cumbersome cat-and-mouse game of constantly catching up and fixing bugs time and time again.
 
 **What also follows is a massive amount of boilerplate validation code.**
 
