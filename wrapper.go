@@ -98,23 +98,24 @@ func New[T WrapperImplementation[V, R], V any, R UnwrapResult]() T {
 	return wrapper
 }
 
-func NewWithValue[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) (*T, error) {
+func NewWithValue[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) (T, error) {
 	wrapper := New[T]()
 
 	if err := wrapper.Wrap(value, false); err != nil {
-		return nil, err
+		var nullWrapper T
+		return nullWrapper, err
 	}
 
-	return &wrapper, nil
+	return wrapper, nil
 }
 
-func NewWithValueUnsafe[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) T {
+func NewWithValueDiscard[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) T {
 	wrapper, err := NewWithValue[T](value)
 	if err != nil {
-		panic(err)
+		wrapper.Discard()
 	}
 
-	return *wrapper
+	return wrapper
 }
 
 // MarshalJSON is a generic implementation of the MarshalJSON method for wrappers. It is used to marshal a wrapper into a JSON value.

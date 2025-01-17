@@ -42,7 +42,7 @@ func TestWrapperRegexEmail_Wrap(t *testing.T) {
 		},
 		{
 			name:        "Input as WrapperProvider (WrapperRegexEmail)",
-			input:       wrappers.NewWithValueUnsafe[*WrapperRegexEmail]("user@example.com"),
+			input:       wrappers.NewWithValueDiscard[*WrapperRegexEmail]("user@example.com"),
 			discard:     false,
 			want:        "user@example.com",
 			wantDiscard: false,
@@ -50,7 +50,7 @@ func TestWrapperRegexEmail_Wrap(t *testing.T) {
 		},
 		{
 			name:        "Input as WrapperProvider (WrapperRegexPhone)",
-			input:       wrappers.NewWithValueUnsafe[*WrapperRegexPhone]("+1234567890"),
+			input:       wrappers.NewWithValueDiscard[*WrapperRegexPhone]("+1234567890"),
 			discard:     false,
 			want:        "",
 			wantDiscard: true,

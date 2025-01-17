@@ -58,7 +58,7 @@ func TestWrapperRegexPhone_Wrap(t *testing.T) {
 		},
 		{
 			name:        "Input as WrapperProvider (WrapperRegexPhone)",
-			input:       wrappers.NewWithValueUnsafe[*WrapperRegexPhone]("+1234567890"),
+			input:       wrappers.NewWithValueDiscard[*WrapperRegexPhone]("+1234567890"),
 			discard:     false,
 			want:        "+1234567890",
 			wantDiscard: false,
