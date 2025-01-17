@@ -195,8 +195,8 @@ func TestDiscarderInStruct(t *testing.T) {
 			name:           "Empty String Input",
 			inputJSON:      `{"value": ""}`,
 			wantValue:      "",
-			wantDiscarded:  false,
-			wantMarshalOut: `{"value":""}`,
+			wantDiscarded:  true,
+			wantMarshalOut: `{"value":null}`,
 		},
 	}
 

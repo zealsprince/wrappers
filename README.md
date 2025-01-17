@@ -16,6 +16,65 @@ Wrappers is a versatile and extensible library for Go that provides a comprehens
 - **Extensible Architecture**: Easily extend the library with custom validation logic as needed.
 - **Performance Optimizations**: Common validations are cache compiled regex patterns to enhance performance.
 
+## What are Wrappers?
+
+Essentially, you'll be used to something like this:
+
+```go
+type User struct {
+    ID    int64  `json:"id"`
+    Name  string `json:"name"`
+    Email string `json:"email"`
+}
+
+func main() {
+    // Unmarshal JSON data into a User struct.
+    var user User
+    err := json.Unmarshal([]byte(`{"id": 1, "name": "Alice", "email": "example@test.com"}`), &user)
+    if err != nil {
+        panic(err)
+    }
+
+    // Validate the user's email address.
+    if !isValidEmail(user.Email) {
+        return errors.New("Invalid email address")
+    }
+
+    // Perform additional checks on the user's ID and name.
+    if user.ID < 0 {
+        return errors.New("Invalid user ID")
+    }
+
+    if user.Name == "" {
+        return errors.New("Invalid user name")
+    }
+
+    // Continue with the rest of the application logic...
+}
+```
+
+But wouldn't it be nice to have something like this instead?
+
+```go
+type User struct {
+    ID    *custom.WrapperPositiveInt `json:"id"`
+    Name  *wrappers.WrapperString    `json:"name"`
+    Email *regex.WrapperRegexEmail   `json:"email"`
+}
+
+func main() {
+    // Unmarshal JSON data into a User struct.
+    var user User
+    err := json.Unmarshal([]byte(`{"id": 1, "name": "Alice", "email": "example@test.com"}`), &user)
+    if err != nil {
+        panic(err) // If there was a failing validation, this would be an error!
+    }
+
+    // And not have to do anything else; it's all handled for you!
+
+    // Plus, if you want to marshal it back to JSON, it will be the same as the input!
+```
+
 ## Overview
 
 The wrappers package provides a structured approach to manage and validate various data types in Go through encapsulation in dedicated wrapper types.

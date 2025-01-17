@@ -119,7 +119,7 @@ func TestWrapperString_JSONMarshal(t *testing.T) {
 				w.Wrap("", false)
 				return w
 			}(),
-			expectedJSON: `""`,
+			expectedJSON: `null`,
 		},
 		{
 			name: "Marshal discarded string",

@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	WrapperRegexName Name = "WrapperString"
+	WrapperStringName Name = "WrapperString"
 )
 
 type WrapperString Wrapper[string, string]
@@ -37,12 +37,17 @@ func (wrapper *WrapperString) Wrap(value any, discard bool) error {
 		wrapper.Value = fmt.Sprintf("%v", v)
 
 	case string:
+		if v == "" {
+			wrapper.Discard()
+			return nil
+		}
+
 		wrapper.Value = v
 
 	default:
 		wrapper.Discard()
 		if !discard {
-			return ErrorType(WrapperRegexName, value)
+			return ErrorType(WrapperStringName, value)
 		}
 	}
 
