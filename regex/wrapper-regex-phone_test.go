@@ -33,8 +33,16 @@ func TestWrapperRegexPhone_Wrap(t *testing.T) {
 			wantError:   false,
 		},
 		{
+			name:        "Valid local phone number",
+			input:       "01234567890",
+			discard:     false,
+			want:        "01234567890",
+			wantDiscard: false,
+			wantError:   false,
+		},
+		{
 			name:        "Invalid phone number",
-			input:       "0123456789",
+			input:       "0000000123456789",
 			discard:     false,
 			want:        "", // Value remains unchanged
 			wantDiscard: true,
@@ -42,7 +50,7 @@ func TestWrapperRegexPhone_Wrap(t *testing.T) {
 		},
 		{
 			name:        "Invalid phone number discard",
-			input:       "0123456789",
+			input:       "0000000123456789",
 			discard:     true,
 			want:        "",
 			wantDiscard: true,
@@ -121,7 +129,7 @@ func TestWrapperRegexPhone_JSONMarshal(t *testing.T) {
 		},
 		{
 			name:         "Invalid phone number marshalling",
-			phone:        "0123456789",
+			phone:        "0000000123456789",
 			wantError:    true,
 			expectedJSON: `{"phone":""}`,
 		},
@@ -186,7 +194,7 @@ func TestWrapperRegexPhone_Unmarshal(t *testing.T) {
 		},
 		{
 			name:      "Invalid phone number unmarshalling",
-			jsonInput: `{"phone":"0123456789"}`,
+			jsonInput: `{"phone":"0000000123456789"}`,
 			wantError: true,
 			want:      "",
 		},
@@ -246,7 +254,7 @@ func TestWrapperRegexPhone_Initialize(t *testing.T) {
 		t.Error("WrapperRegexPhone should be marked as initialized")
 	}
 
-	expectedPattern := `^\+?[1-9]\d{1,14}$`
+	expectedPattern := `^(?:\+?[1-9]\d{1,14}|0\d{1,14})$`
 	if wrapper.WrapperRegex.regex.String() != expectedPattern {
 		t.Errorf("Expected pattern %s, got %s", expectedPattern, wrapper.WrapperRegex.regex.String())
 	}
