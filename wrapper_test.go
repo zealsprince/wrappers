@@ -2,10 +2,248 @@ package wrappers
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/biter777/countries"
 )
+
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		wrapper WrapperProvider
+	}{
+		{
+			name:    "New WrapperBool",
+			wrapper: func() WrapperProvider { return New[*WrapperBool]() }(),
+		},
+		{
+			name:    "New WrapperCountry",
+			wrapper: func() WrapperProvider { return New[*WrapperCountry]() }(),
+		},
+		{
+			name:    "New WrapperFloat",
+			wrapper: func() WrapperProvider { return New[*WrapperFloat]() }(),
+		},
+		{
+			name:    "New WrapperInt",
+			wrapper: func() WrapperProvider { return New[*WrapperInt]() }(),
+		},
+		{
+			name:    "New WrapperString",
+			wrapper: func() WrapperProvider { return New[*WrapperString]() }(),
+		},
+		{
+			name:    "New WrapperTime",
+			wrapper: func() WrapperProvider { return New[*WrapperTime]() }(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Check if the wrapper is initialized
+			if !tt.wrapper.IsInitialized() {
+				t.Errorf("Wrapper not initialized")
+			}
+		})
+	}
+}
+
+func TestNewWithValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		wrapper WrapperProvider
+		want    any
+	}{
+		{
+			name:    "NewWithValue WrapperBool with true",
+			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperBool](true); return wrapper }(),
+			want:    true,
+		},
+		{
+			name:    "NewWithValue WrapperCountry with CountryCodeUS",
+			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperCountry](countries.US); return wrapper }(),
+			want:    "United States",
+		},
+		{
+			name:    "NewWithValue WrapperFloat with 123.456",
+			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperFloat](123.456); return wrapper }(),
+			want:    123.456,
+		},
+		{
+			name:    "NewWithValue WrapperInt with 100",
+			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperInt](100); return wrapper }(),
+			want:    int64(100),
+		},
+		{
+			name:    "NewWithValue WrapperString with 'Test String'",
+			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperString]("Test String"); return wrapper }(),
+			want:    "Test String",
+		},
+		{
+			name: "NewWithValue WrapperTime with time.Time",
+			wrapper: func() WrapperProvider {
+				wrapper, _ := NewWithValue[*WrapperTime](time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC))
+				return wrapper
+			}(),
+			want: time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC).Format(time.RFC3339),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Check if the wrapper is initialized
+			if !tt.wrapper.IsInitialized() {
+				t.Errorf("Wrapper not initialized")
+			}
+
+			// Check if the wrapped value is correct
+			if tt.wrapper.UnwrapAny() != tt.want {
+				t.Errorf("Wrapped value = %v, want %v", tt.wrapper.UnwrapAny(), tt.want)
+			}
+		})
+	}
+}
+
+// We're going to create a new wrapper type that only accepts positive integers.
+const (
+	wrapperCustomIntPositiveName Name = "WrapperCustomIntPositive"
+)
+
+type wrapperCustomIntPositive struct {
+	WrapperInt
+}
+
+func (wrapper *wrapperCustomIntPositive) handleValue(value int64) error {
+	if value < 0 {
+		wrapper.Discard()
+		return ErrorValue(wrapperCustomIntPositiveName, value, "positive int")
+	} else {
+		wrapper.Value = value
+	}
+
+	return nil
+}
+
+func (wrapper *wrapperCustomIntPositive) Wrap(value any, discard bool) error {
+	switch v := value.(type) {
+	case nil:
+		wrapper.Discard()
+
+	case WrapperProvider:
+		if v.IsDiscarded() {
+			wrapper.Discard()
+			return nil
+		}
+
+		return wrapper.Wrap(v.UnwrapAny(), discard)
+
+	case string:
+		converted, err := strconv.Atoi(v)
+		if err != nil {
+			wrapper.Discard()
+			if !discard {
+				return ErrorValue(wrapperCustomIntPositiveName, value, "int")
+			}
+		}
+
+		wrapper.handleValue(int64(converted))
+
+	case int:
+		wrapper.handleValue(int64(v))
+
+	case int16:
+		wrapper.handleValue(int64(v))
+
+	case int32:
+		wrapper.handleValue(int64(v))
+
+	case int64:
+		wrapper.handleValue(int64(v))
+	}
+
+	return nil
+}
+
+var _ WrapperProvider = (*WrapperString)(nil) // Ensure that WrapperString implements WrapperProvider.
+
+func TestNewWithValueDiscard(t *testing.T) {
+	tests := []struct {
+		name        string
+		wrapper     WrapperProvider
+		want        any
+		wantDiscard bool
+	}{
+		{
+			name:        "NewWithValueDiscard WrapperBool with true",
+			wrapper:     NewWithValueDiscard[*WrapperBool](true),
+			want:        true,
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperCountry with CountryCodeUS",
+			wrapper:     NewWithValueDiscard[*WrapperCountry](countries.US),
+			want:        "United States",
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperFloat with 123.456",
+			wrapper:     NewWithValueDiscard[*WrapperFloat](123.456),
+			want:        123.456,
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperInt with 100",
+			wrapper:     NewWithValueDiscard[*WrapperInt](100),
+			want:        int64(100),
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperString with 'Test String'",
+			wrapper:     NewWithValueDiscard[*WrapperString]("Test String"),
+			want:        "Test String",
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperTime with time.Time",
+			wrapper:     NewWithValueDiscard[*WrapperTime](time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC)),
+			want:        time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC).Format(time.RFC3339),
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperIntPositive with 100",
+			wrapper:     NewWithValueDiscard[*wrapperCustomIntPositive](100),
+			want:        int64(100),
+			wantDiscard: false,
+		},
+		{
+			name:        "NewWithValueDiscard WrapperIntPositive with -100",
+			wrapper:     NewWithValueDiscard[*wrapperCustomIntPositive](-100),
+			want:        int64(0),
+			wantDiscard: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Check if the wrapper is initialized
+			if !tt.wrapper.IsInitialized() {
+				t.Errorf("Wrapper not initialized")
+			}
+
+			// Check if the wrapped value is discarded
+			if !tt.wrapper.IsDiscarded() && tt.wantDiscard {
+				t.Errorf("Wrapped value is not discarded")
+			}
+
+			if tt.wrapper.UnwrapAny() != tt.want {
+				t.Errorf("Wrapped value = %v, want %v", tt.wrapper.UnwrapAny(), tt.want)
+			}
+		})
+	}
+}
 
 type ExampleNested struct {
 	NestedNumberValue *WrapperInt    `json:"nested_number_value"`

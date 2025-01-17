@@ -112,7 +112,10 @@ func NewWithValue[T WrapperImplementation[V, R], V any, R UnwrapResult](value V)
 func NewWithValueDiscard[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) T {
 	wrapper, err := NewWithValue[T](value)
 	if err != nil {
-		wrapper.Discard()
+		// Make sure that we have a wrapper and not a null value. This is important for derived wrappers with unexpected behavior.
+		if !reflect.ValueOf(wrapper).IsNil() {
+			wrapper.Discard()
+		}
 	}
 
 	return wrapper
