@@ -22,7 +22,6 @@ func (wrapper *WrapperTimeDuration) GetAny() any {
 }
 
 func (wrapper *WrapperTimeDuration) Wrap(value any, discard bool) error {
-	fmt.Printf("v: %v\n", value)
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
