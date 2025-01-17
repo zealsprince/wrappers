@@ -102,10 +102,10 @@ The wrappers package provides a structured approach to manage and validate vario
 
 **Marshalling**: The MarshalJSON method enables wrappers to be serialized into JSON format. When a struct containing wrappers is marshalled, discarded values are serialized as null or omitted (if marked with omitempty and nilled), ensuring accurate representation.
 
+**Unmarshalling**: The UnmarshalJSON method allows JSON data to populate the corresponding wrappers. It validates the incoming data, storing values if they fit the expected format or discarding them otherwise, while also handling errors appropriately.
+
 > [!WARNING]
 > This requires further handling to ensure no erroneous data is processed. It is generally recommended - especially during unmarshalling - to handle the unmarshal errors and not proceed with invalid data.
-
-**Unmarshalling**: The UnmarshalJSON method allows JSON data to populate the corresponding wrappers. It validates the incoming data, storing values if they fit the expected format or discarding them otherwise, while also handling errors appropriately.
 
 ## Sub-packages
 
