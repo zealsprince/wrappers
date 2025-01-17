@@ -206,7 +206,7 @@ func TestWrapperFloat_JSONUnmarshal(t *testing.T) {
 			jsonInput:   "null",
 			want:        0.0,
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Unmarshal unsupported type",

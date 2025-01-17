@@ -70,7 +70,9 @@ func (wrapper *WrapperRegex) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
-		return nil
+		if !discard {
+			return wrappers.ErrorNil(wrapper.name)
+		}
 
 	case wrappers.WrapperProvider:
 		if v.IsDiscarded() {
@@ -81,6 +83,13 @@ func (wrapper *WrapperRegex) Wrap(value any, discard bool) error {
 		return wrapper.Wrap(v.UnwrapAny(), discard)
 
 	case string:
+		if v == "" {
+			wrapper.Discard()
+			if !discard {
+				return wrappers.ErrorNil(wrapper.name)
+			}
+		}
+
 		str = v
 
 	default:

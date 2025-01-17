@@ -71,7 +71,7 @@ func TestWrapperCountry_Wrap(t *testing.T) {
 			input:       nil,
 			discard:     false,
 			want:        "Unknown",
-			wantError:   false,
+			wantError:   true,
 			wantDiscard: true,
 		},
 		{

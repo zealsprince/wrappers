@@ -54,7 +54,7 @@ func TestWrapperRegexPhone_Wrap(t *testing.T) {
 			discard:     false,
 			want:        "", // Value remains unchanged
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Input as WrapperProvider (WrapperRegexPhone)",
@@ -159,11 +159,7 @@ func TestWrapperRegexPhone_JSONMarshal(t *testing.T) {
 
 			// Marshal to JSON
 			jsonData, err := json.Marshal(data)
-			if tt.wantError && err == nil {
-				t.Fatalf("Expected error during marshalling but got none")
-			}
-
-			if !tt.wantError && err != nil {
+			if err != nil {
 				t.Fatalf("Unexpected error during marshalling: %v", err)
 			}
 
@@ -203,7 +199,7 @@ func TestWrapperRegexPhone_Unmarshal(t *testing.T) {
 		{
 			name:      "Nil JSON input unmarshalling",
 			jsonInput: `{"phone":null}`,
-			wantError: false,
+			wantError: true,
 			want:      "",
 		},
 		{

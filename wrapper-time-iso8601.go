@@ -26,6 +26,9 @@ func (wrapper *WrapperTimeISO8601) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
+		if !discard {
+			return ErrorNil(WrapperTimeISO8601Name)
+		}
 
 	case WrapperTime:
 		if v.IsDiscarded() {

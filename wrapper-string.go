@@ -24,6 +24,9 @@ func (wrapper *WrapperString) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
+		if !discard {
+			return ErrorNil(WrapperStringName)
+		}
 
 	case WrapperProvider:
 		if v.IsDiscarded() {
@@ -39,7 +42,9 @@ func (wrapper *WrapperString) Wrap(value any, discard bool) error {
 	case string:
 		if v == "" {
 			wrapper.Discard()
-			return nil
+			if !discard {
+				return ErrorNil(WrapperStringName)
+			}
 		}
 
 		wrapper.Value = v

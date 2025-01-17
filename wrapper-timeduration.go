@@ -25,6 +25,9 @@ func (wrapper *WrapperTimeDuration) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
+		if !discard {
+			return ErrorNil(WrapperTimeDurationName)
+		}
 
 	case WrapperProvider:
 		if v.IsDiscarded() {

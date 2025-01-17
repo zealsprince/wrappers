@@ -46,6 +46,9 @@ func (wrapper *WrapperEnum[T]) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
+		if !discard {
+			return wrappers.ErrorNil(wrapper.name)
+		}
 
 	case wrappers.WrapperProvider:
 		if v.IsDiscarded() {

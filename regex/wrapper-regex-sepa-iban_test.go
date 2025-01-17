@@ -46,7 +46,7 @@ func TestWrapperRegexSepaIban_Wrap(t *testing.T) {
 			input:       nil,
 			discard:     false,
 			want:        "",
-			wantError:   false,
+			wantError:   true,
 			wantDiscard: true,
 		},
 		{

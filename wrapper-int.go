@@ -25,6 +25,9 @@ func (wrapper *WrapperInt) Wrap(value any, discard bool) error {
 	switch v := value.(type) {
 	case nil:
 		wrapper.Discard()
+		if !discard {
+			return ErrorNil(WrapperIntName)
+		}
 
 	case WrapperProvider:
 		if v.IsDiscarded() {

@@ -174,7 +174,7 @@ func TestWrapperString_JSONUnmarshal(t *testing.T) {
 			jsonInput:   `null`,
 			want:        "",
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Unmarshal numeric type",

@@ -95,7 +95,7 @@ func TestWrapperInt_Wrap(t *testing.T) {
 			input:       nil,
 			discard:     false,
 			want:        0, // Discarded
-			wantError:   false,
+			wantError:   true,
 			wantDiscard: true,
 		},
 		{
@@ -237,7 +237,7 @@ func TestWrapperInt_JSONUnmarshal(t *testing.T) {
 			jsonInput:   "null",
 			want:        0,
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Unmarshal invalid JSON type (object)",

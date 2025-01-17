@@ -53,7 +53,7 @@ func TestWrapperTimeDuration_Wrap(t *testing.T) {
 			input:       nil,
 			discard:     false,
 			want:        "0s",
-			wantError:   false,
+			wantError:   true,
 			wantDiscard: true,
 		},
 		{
@@ -215,7 +215,7 @@ func TestWrapperTimeDuration_JSONUnmarshal(t *testing.T) {
 			jsonInput:   `null`,
 			want:        "0s",
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Unmarshal unsupported type (object)",

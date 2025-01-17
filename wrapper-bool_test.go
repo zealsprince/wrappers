@@ -232,7 +232,7 @@ func TestWrapperBool_JSONUnmarshal(t *testing.T) {
 			jsonInput:   "null",
 			want:        false,
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 	}
 

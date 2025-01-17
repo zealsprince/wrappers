@@ -53,7 +53,7 @@ func TestWrapperTimeISO8601_Wrap(t *testing.T) {
 			input:       nil,
 			discard:     false,
 			want:        "0001-01-01T00:00:00Z",
-			wantError:   false,
+			wantError:   true,
 			wantDiscard: true,
 		},
 		{
@@ -203,7 +203,7 @@ func TestWrapperTimeISO8601_JSONUnmarshal(t *testing.T) {
 			jsonInput:   `null`,
 			want:        "0001-01-01T00:00:00Z",
 			wantDiscard: true,
-			wantError:   false,
+			wantError:   true,
 		},
 		{
 			name:        "Unmarshal unsupported type (number)",
