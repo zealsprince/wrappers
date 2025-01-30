@@ -4,7 +4,7 @@ import "github.com/zealsprince/wrappers"
 
 const (
 	WrapperRegexSepaBicName    wrappers.Name = "WrapperRegexSepaBic"
-	WrapperRegexSepaBicPattern string        = `^[A-Z]{6}[A-Z2-9]{2}$`
+	WrapperRegexSepaBicPattern string        = `^[A-Z]{6,6}[A-Z2-9][A-NP-Z0-9]([A-Z0-9]{3,3}){0,1}$`
 )
 
 type WrapperRegexSepaBic struct {
