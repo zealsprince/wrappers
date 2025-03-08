@@ -1,6 +1,6 @@
 # Wrappers
 
-![Go](https://img.shields.io/badge/Go-1.23.4%2B-blue.svg)
+![Go](https://img.shields.io/badge/Go-1.24.1%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 [![Build Go application](https://github.com/zealsprince/wrappers/actions/workflows/go-build.yml/badge.svg)](https://github.com/zealsprince/wrappers/actions/workflows/go-build.yml)
 [![Test Go application](https://github.com/zealsprince/wrappers/actions/workflows/go-test.yml/badge.svg)](https://github.com/zealsprince/wrappers/actions/workflows/go-test.yml)

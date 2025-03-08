@@ -6,7 +6,7 @@ import (
 
 const (
 	WrapperRegexEmailName    wrappers.Name = "WrapperRegexEmail"
-	WrapperRegexEmailPattern string        = `^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`
+	WrapperRegexEmailPattern string        = `^[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9]+\-?)*[a-zA-Z0-9]+\.[a-zA-Z]{2,}$`
 )
 
 // WrapperRegexEmail is a specialized wrapper for validating email addresses.

@@ -26,9 +26,9 @@ var (
 	regexCacheMu sync.RWMutex
 )
 
-// NewWrapperRegexRegex creates a new WrapperRegex with the given name and regex pattern.
-// It caches the compiled regex to optimize performance.
-func (wrapper *WrapperRegex) SetPattern(name wrappers.Name, pattern string) error {
+// SetPattern sets the regex pattern for the wrapper. It should be called during initialization. It caches the compiled regex to optimize performance.
+// NOTE: This method will panic if the regex pattern is invalid. It is recommended to use this method only during initialization and not at runtime.
+func (wrapper *WrapperRegex) SetPattern(name wrappers.Name, pattern string) {
 	regexCacheMu.RLock()
 	regex, exists := regexCache[pattern]
 	regexCacheMu.RUnlock()
@@ -37,7 +37,7 @@ func (wrapper *WrapperRegex) SetPattern(name wrappers.Name, pattern string) erro
 		var err error
 		regex, err = regexp.Compile(pattern)
 		if err != nil {
-			return fmt.Errorf("failed to compile regex for %s: %w", name, err)
+			panic(fmt.Errorf("failed to compile regex for %s: %w", name, err))
 		}
 		wrapper.regex = regex
 
@@ -51,7 +51,7 @@ func (wrapper *WrapperRegex) SetPattern(name wrappers.Name, pattern string) erro
 	wrapper.pattern = pattern
 	wrapper.regex = regex
 
-	return nil
+	return
 }
 
 // Get returns the wrapped string.

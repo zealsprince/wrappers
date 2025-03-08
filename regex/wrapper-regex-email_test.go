@@ -191,7 +191,7 @@ func TestWrapperRegexEmail_Initialize(t *testing.T) {
 		t.Error("WrapperRegexEmail should be marked as initialized")
 	}
 
-	expectedPattern := `^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`
+	expectedPattern := `^[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9]+\-?)*[a-zA-Z0-9]+\.[a-zA-Z]{2,}$`
 	if wrapper.WrapperRegex.regex.String() != expectedPattern {
 		t.Errorf("Expected pattern %s, got %s", expectedPattern, wrapper.WrapperRegex.regex.String())
 	}
