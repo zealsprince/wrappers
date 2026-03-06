@@ -81,7 +81,7 @@ func main() {
     // Plus, if you want to marshal it back to JSON, it will be the same as the input!
 ```
 
-You can chose to discard values without raising errors
+You can chose to discard values without raising errors as well when they fail to match to a wrapper. Do this at your own risk (of having to add more guards).
 
 ## Overview
 
@@ -162,7 +162,7 @@ func main() {
 }
 ```
 
-Notice that handling and type conversion is performed by the wrappers. However, during cases where an invalid value is passed, wrappers can discard the value without raising an error. This should generally be avoided or used in strict combination with the `IsDiscarded` method to assure no erroneous is further handled and causing side-effects.
+Notice that handling and type conversion is performed by the wrappers. However, during cases where an invalid value is passed, wrappers can discard the value without raising an error. This should generally be avoided or used in strict combination with the `IsDiscarded` method to assure no erroneous data is further handled and causing side-effects.
 
 ```go
     // [...] Continuation of previous code
@@ -346,13 +346,13 @@ I conceived the idea of this library while working at [Savages Corp](https://git
 
 Wrappers was created to address several pervasive challenges developers encounter when managing and validating data within Go applications. Its creation was driven by the need for a more efficient, type-safe, and extensible approach to handling diverse data types, especially in contexts involving JSON serialization and deserialization. Below are the primary motivations behind developing Wrappers:
 
-1. Enhanced Data Validation: In many Go applications, ensuring the integrity and validity of data—whether coming from user input, external APIs, or databases—is paramount. Traditional approaches often involve repetitive boilerplate code to perform type assertions, range checks, and format validations. Wrappers streamline this process by encapsulating validation logic within dedicated types, reducing redundancy and minimizing the likelihood of human error.
+1. Enhanced Data Validation: In many Go applications, ensuring the integrity and validity of data - whether coming from user input, external APIs, or databases - is paramount. Traditional approaches often involve repetitive boilerplate code to perform type assertions, range checks, and format validations. Wrappers streamline this process by encapsulating validation logic within dedicated types, reducing redundancy and minimizing the likelihood of human error.
 
 2. Type Safety and Generics Leveraging: Go's type system is robust, but when dealing with generic data structures or interfaces like any, maintaining type safety can become cumbersome. Wrappers harness Go's generics to provide a type-safe mechanism for wrapping and unwrapping values. This ensures that data transformations are explicit and safeguarded against type mismatches, enhancing overall code reliability.
 
 3. Seamless JSON Integration: JSON is a ubiquitous data interchange format, and Go's encoding/json package is widely used for serialization and deserialization. However, integrating complex validation logic directly within structs can lead to verbose and hard-to-maintain code. Wrappers automate validation during JSON operations, ensuring that data adheres to specified formats and constraints without cluttering the business logic with repetitive checks.
 
-4. Reduction of Boilerplate Code: Manual validation and type conversion often result in repetitive code patterns that are both time-consuming to write and difficult to maintain. By providing generic wrappers and reusable validation mechanisms—such as regex-based validators—Wrappers significantly reduce the need for boilerplate code. This allows developers to focus on core application logic rather than mundane validation tasks.
+4. Reduction of Boilerplate Code: Manual validation and type conversion often result in repetitive code patterns that are both time-consuming to write and difficult to maintain. By providing generic wrappers and reusable validation mechanisms - such as regex-based validators - Wrappers significantly reduce the need for boilerplate code. This allows developers to focus on core application logic rather than mundane validation tasks.
 
 5. Extensibility for Custom Validation Needs: Every application has unique data validation requirements. Wrappers are designed with extensibility in mind, allowing developers to create custom wrappers tailored to specific validation rules or data formats. This flexibility ensures that Wrappers can adapt to a wide range of use cases, from simple type checks to complex pattern validations.
 
