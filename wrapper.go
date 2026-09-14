@@ -110,12 +110,14 @@ func NewWithValue[T WrapperImplementation[V, R], V any, R UnwrapResult](value V)
 }
 
 func NewWithValueDiscard[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) T {
-	wrapper, err := NewWithValue[T](value)
-	if err != nil {
-		// Make sure that we have a wrapper and not a null value. This is important for derived wrappers with unexpected behavior.
-		if !reflect.ValueOf(wrapper).IsNil() {
-			wrapper.Discard()
-		}
+	wrapper := New[T]()
+
+	// Wrap with the discard flag set so an invalid value flags the wrapper rather
+	// than raising. Up to v1.1.6 this built on NewWithValue, which hands back a nil
+	// wrapper on error, so an invalid value produced a nil pointer that panicked on
+	// the first method call instead of the discarded wrapper the name promises.
+	if err := wrapper.Wrap(value, true); err != nil {
+		wrapper.Discard()
 	}
 
 	return wrapper
