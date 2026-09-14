@@ -41,11 +41,30 @@ func (wrapper *WrapperBool) Wrap(value any, discard bool) error {
 	case bool:
 		wrapper.Value = v
 
-	case int, int8, int16, int32, int64:
+	// Same reason as the duration wrapper: in a multi-type case v keeps the
+	// interface type, so "v != 0" compared an interface against an untyped
+	// constant that defaults to int. int64(0) has a different dynamic type to
+	// int(0), so a legitimate zero came back as true.
+	case int:
 		wrapper.Value = v != 0
 
-	case float32, float64:
-		wrapper.Value = v != 0.0
+	case int8:
+		wrapper.Value = v != 0
+
+	case int16:
+		wrapper.Value = v != 0
+
+	case int32:
+		wrapper.Value = v != 0
+
+	case int64:
+		wrapper.Value = v != 0
+
+	case float32:
+		wrapper.Value = v != 0
+
+	case float64:
+		wrapper.Value = v != 0
 
 	case string:
 		switch strings.ToLower(v) {

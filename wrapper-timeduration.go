@@ -40,11 +40,30 @@ func (wrapper *WrapperTimeDuration) Wrap(value any, discard bool) error {
 	case time.Duration:
 		wrapper.Value = v
 
-	case int, int8, int16, int32, int64:
-		wrapper.Value = time.Duration(v.(int))
+	// One case per type. A multi-type case leaves v with the interface type, so
+	// the old v.(int) assertion panicked on everything that was not literally an
+	// int, including the int64 that WrapperInt.UnwrapAny hands over when wrappers
+	// are nested.
+	case int:
+		wrapper.Value = time.Duration(v)
 
-	case float32, float64:
-		wrapper.Value = time.Duration(v.(float64))
+	case int8:
+		wrapper.Value = time.Duration(v)
+
+	case int16:
+		wrapper.Value = time.Duration(v)
+
+	case int32:
+		wrapper.Value = time.Duration(v)
+
+	case int64:
+		wrapper.Value = time.Duration(v)
+
+	case float32:
+		wrapper.Value = time.Duration(v)
+
+	case float64:
+		wrapper.Value = time.Duration(v)
 
 	case string:
 		converted, err := time.ParseDuration(v)
