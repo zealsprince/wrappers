@@ -133,3 +133,37 @@ func TestCheckReportsAbsentField(t *testing.T) {
 		t.Errorf("errors.Is(err, ErrMissing) = false, want true (got %v)", err)
 	}
 }
+
+func TestParseAcceptsTheEnumTypeAndBytes(t *testing.T) {
+	t.Run("the enum's own type", func(t *testing.T) {
+		var w enum.CardinalDirections
+
+		if err := w.Wrap(enum.DirectionNorth); err != nil {
+			t.Fatalf("Wrap(CardinalDirection) error = %v, want nil", err)
+		}
+
+		if got := w.Get(); got != enum.DirectionNorth {
+			t.Errorf("Get() = %q, want %q", got, enum.DirectionNorth)
+		}
+	})
+
+	t.Run("raw bytes", func(t *testing.T) {
+		var w enum.CardinalDirections
+
+		if err := w.Wrap([]byte("south")); err != nil {
+			t.Fatalf("Wrap([]byte) error = %v, want nil", err)
+		}
+
+		if got := w.Get(); got != enum.DirectionSouth {
+			t.Errorf("Get() = %q, want %q", got, enum.DirectionSouth)
+		}
+	})
+
+	t.Run("unconvertible type", func(t *testing.T) {
+		var w enum.CardinalDirections
+
+		if err := w.Wrap(map[string]int{}); err == nil {
+			t.Error("Wrap(map) error = nil, want a type error")
+		}
+	})
+}

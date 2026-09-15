@@ -1,165 +1,236 @@
 package wrappers
 
 import (
+	"bytes"
 	"encoding/json"
-	"fmt"
-	"reflect"
 )
 
-const (
-	WrappersTagHeader  = "wrappers"
-	WrappersTagDiscard = "discard"
-)
+// Rule is the validation policy for a wrapper, carried as a type parameter rather
+// than embedded. A rule is expected to be zero-sized: the core reaches it with
+// `var r R`, so there is no construction step and nothing to forget to initialize.
+type Rule[T any] interface {
+	// Name identifies the rule in error messages.
+	Name() Name
 
-// Wrapper is an interface that wraps a value. It has two methods: Wrap and Unwrap.
+	// Parse converts loosely typed input into T. Nested wrappers and nil are
+	// resolved by the core before Parse is called, so implementations only see
+	// concrete values. Reuse the built-in parsers (StringParser, Int64Parser and
+	// friends) by embedding them instead of writing this from scratch.
+	Parse(any) (T, error)
 
-// Wrappers are used to perform type assertions and validations on values before assigment and later retrieval.
-// Their main value add is that they commonly implement the Wrapper interface, which allows them to be used in a generic way.
-
-// When wrapping a value, the Wrap method is called with the value to be wrapped and a boolean indicating if the value should be discarded if it is invalid.
-
-// Name is a type that holds the name of the wrapper. It is used to identify the wrapper in error messages.
-type Name string
-
-// WrapperBase is a struct that holds the basic fields of a wrapper. It is embedded in all wrapper implementations.
-type WrapperBase struct {
-	initialized bool // Indicates if the wrapper has been initialized.
-	discarded   bool // If this is true, unwrapping will return nil. This is useful when we want to discard for processes where we need to explicitly exclude data such as during an API call where we shouldn't send a field.
+	// Validate applies the semantic check on top of a parsed value. Plain types
+	// embed a parser that supplies a no-op.
+	Validate(T) error
 }
 
-func (wrapper *WrapperBase) Initialize() {
-	wrapper.initialized = true
+// unwrapper is the shape every wrapper satisfies. It lets one wrapper accept
+// another as input without the core knowing the concrete types involved.
+type unwrapper interface {
+	UnwrapAny() any
+	IsDiscarded() bool
 }
 
-func (wrapper *WrapperBase) IsInitialized() bool {
-	return wrapper.initialized
+// Wrapper holds a validated value of type T under rule R.
+//
+// The zero Wrapper is usable. It carries no initialized flag, no lazy setup and
+// no mutation during marshalling, so marshalling the same value from several
+// goroutines is safe.
+type Wrapper[T any, R Rule[T]] struct {
+	value     T
+	discarded bool
+	present   bool
 }
 
-func (wrapper *WrapperBase) Discard() {
-	wrapper.discarded = true
+// wrappable constrains the constructors to pointers-to-wrapper. Naming the
+// wrapper alias is enough, so callers write Of[Int]("1") rather than restating
+// the wrapped type and the rule, and the built-in rules can stay unexported.
+type wrappable[W any] interface {
+	*W
+
+	Wrap(any) error
+	Discard()
 }
 
-func (wrapper *WrapperBase) IsDiscarded() bool {
-	return wrapper.discarded
+// Of builds a wrapper from a value, validating it.
+func Of[W any, PW wrappable[W]](value any) (W, error) {
+	var w W
+
+	err := PW(&w).Wrap(value)
+
+	return w, err
 }
 
-// WrapperProvider is an interface that defines the methods that a wrapper must implement.
-type WrapperProvider interface {
-	// The initization methods are important in cases where parameters or other custom logic is needed before the wrapper can be used.
-	// An example of this would be derivitives of the WrapperRegex wrapper where we need to set the regex pattern before we can use the wrapper.
-	Initialize()         // Initializes the wrapper.
-	IsInitialized() bool // Returns true if the wrapper has been initialized.
-
-	Discard()          // Discards the value. Sets the Discard flag to true.
-	IsDiscarded() bool // Returns true if the value was discarded. This method is important as it is called during marshalling to JSON. If the value was nullified, we should return nil.
-
-	Wrap(any, bool) error // Wraps a value. The value is validated and stored in the wrapper with the wrappers type. The discard parameter indicates if the value should be discarded if it is invalid without returning an error.
-
-	// We need to implement the MarshalJSON and UnmarshalJSON methods in order to be able to use the wrappers in JSON marshalling and unmarshalling.
-	MarshalJSON() ([]byte, error)
-	UnmarshalJSON([]byte) error
-
-	UnwrapAny() any // Similar to Unwrap, but returns the value as an interface{}.
-	GetAny() any    // Similar to Get, but returns the value as an interface{}.
-}
-
-type UnwrapResult interface {
-	bool | int64 | float64 | string // The unwrap method always returns a value of this type.
-}
-
-// The core wrapper struct used for all implementations. Importantly, it is a generic implementation but embeds the WrapperBase struct.
-type Wrapper[V any, R any] struct {
-	WrapperBase
-	Value V // The value that is wrapped.
-}
-
-// The main implementation of a Wrapper. This is the core implementation that all other wrappers should implement.
-type WrapperImplementation[V any, R UnwrapResult] interface {
-	WrapperProvider
-
-	Unwrap() R // Gets the stored value as one of the types specified in the any interface.
-	Get() V    // Gets the stored "wrapped" value. Useful when you want to work with the value directly. This is the case when nesting wrappers.
-}
-
-func New[T WrapperImplementation[V, R], V any, R UnwrapResult]() T {
-	// Create a new instance of type T using reflection
-	var wrapper T
-
-	// Check if T is a pointer type
-	if reflect.TypeOf(wrapper).Kind() == reflect.Ptr {
-		// Create a new instance of the type pointed to by T
-		v := reflect.New(reflect.TypeOf(wrapper).Elem())
-		wrapper = v.Interface().(T) // Type assertion to T
+// MustOf builds a wrapper from a value and panics if it does not validate.
+// Intended for package level values and tests, not for request data.
+func MustOf[W any, PW wrappable[W]](value any) W {
+	w, err := Of[W, PW](value)
+	if err != nil {
+		panic(err)
 	}
 
-	// Initialize the wrapper
-	wrapper.Initialize()
-
-	return wrapper
+	return w
 }
 
-func NewWithValue[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) (T, error) {
-	wrapper := New[T]()
+// OfDiscard builds a wrapper from a value, discarding it if invalid. Unlike v1's
+// NewWithValueDiscard this always returns a usable wrapper, never a nil pointer.
+func OfDiscard[W any, PW wrappable[W]](value any) W {
+	var w W
 
-	if err := wrapper.Wrap(value, false); err != nil {
-		var nullWrapper T
-		return nullWrapper, err
+	if err := PW(&w).Wrap(value); err != nil {
+		PW(&w).Discard()
 	}
 
-	return wrapper, nil
+	return w
 }
 
-func NewWithValueDiscard[T WrapperImplementation[V, R], V any, R UnwrapResult](value V) T {
-	wrapper := New[T]()
+// Wrap validates a value and stores it. A successful Wrap clears any prior
+// discard, so a wrapper can be reused without carrying a stale flag.
+func (w *Wrapper[T, R]) Wrap(value any) error {
+	var rule R
 
-	// Wrap with the discard flag set so an invalid value flags the wrapper rather
-	// than raising. Up to v1.1.6 this built on NewWithValue, which hands back a nil
-	// wrapper on error, so an invalid value produced a nil pointer that panicked on
-	// the first method call instead of the discarded wrapper the name promises.
-	if err := wrapper.Wrap(value, true); err != nil {
-		wrapper.Discard()
+	w.present = true
+
+	// A wrapper handed to another wrapper contributes its unwrapped value, and a
+	// discarded one propagates the discard rather than its zero value.
+	if nested, ok := value.(unwrapper); ok {
+		if nested.IsDiscarded() {
+			w.discard()
+
+			return nil
+		}
+
+		value = nested.UnwrapAny()
 	}
 
-	return wrapper
+	if value == nil {
+		w.discard()
+
+		return errNil(rule.Name())
+	}
+
+	parsed, err := rule.Parse(value)
+	if err != nil {
+		w.discard()
+
+		return named(rule.Name(), err)
+	}
+
+	if err := rule.Validate(parsed); err != nil {
+		w.discard()
+
+		return named(rule.Name(), err)
+	}
+
+	w.value = parsed
+	w.discarded = false
+
+	return nil
 }
 
-// MarshalJSON is a generic implementation of the MarshalJSON method for wrappers. It is used to marshal a wrapper into a JSON value.
-// All wrappers should call this method in their MarshalJSON implementation.
-func MarshalJSON(wrapper WrapperProvider) ([]byte, error) {
-	if reflect.ValueOf(wrapper).IsNil() {
-		return nil, fmt.Errorf("marshal into nil wrapper")
-	}
-
-	if !wrapper.IsInitialized() { // Make sure the wrapper is initialized since for marshalling we new to automatically initialize the wrapper.
-		wrapper.Initialize()
-	}
-
-	if wrapper.IsDiscarded() {
-		return json.Marshal(nil)
-	}
-
-	result, err := json.Marshal(wrapper.UnwrapAny())
-
-	return result, err
+// WrapDiscard validates a value and discards it if invalid, reporting whether it
+// was kept. The v1 boolean parameter is gone: the two behaviours are two methods.
+func (w *Wrapper[T, R]) WrapDiscard(value any) bool {
+	return w.Wrap(value) == nil
 }
 
-// UnmarshalJSON is a generic implementation of the UnmarshalJSON method for wrappers. It is used to unmarshal a JSON value into a wrapper.
-// All wrappers should call this method in their UnmarshalJSON implementation.
-func UnmarshalJSON(data []byte, wrapper WrapperProvider) error {
-	if reflect.ValueOf(wrapper).IsNil() {
-		return fmt.Errorf("unmarshal into nil wrapper")
+// Get returns the stored value in its wrapped type, zero if discarded.
+func (w Wrapper[T, R]) Get() T {
+	if w.discarded {
+		var zero T
+
+		return zero
 	}
 
-	if !wrapper.IsInitialized() { // Same as with marshalling, we need to initialize the wrapper before unmarshalling.
-		wrapper.Initialize()
+	return w.value
+}
+
+// Unwrap returns the value in the form the rule serializes to.
+func (w Wrapper[T, R]) Unwrap() any {
+	var rule R
+	if u, ok := any(rule).(interface{ Unwrap(T) any }); ok {
+		return u.Unwrap(w.Get())
 	}
 
-	// Perform regular JSON unmarshalling
-	var s interface{}
-	if err := json.Unmarshal(data, &s); err != nil {
+	return w.Get()
+}
+
+// UnwrapAny satisfies the unwrapper interface so wrappers can nest.
+func (w Wrapper[T, R]) UnwrapAny() any { return w.Unwrap() }
+
+// IsDiscarded reports whether the last wrap rejected its input.
+func (w Wrapper[T, R]) IsDiscarded() bool { return w.discarded }
+
+// IsPresent reports whether the wrapper was ever given input. A field absent from
+// a JSON payload leaves this false, which is what Check keys off.
+func (w Wrapper[T, R]) IsPresent() bool { return w.present }
+
+// IsValid reports whether the wrapper holds a value that passed its rule.
+func (w Wrapper[T, R]) IsValid() bool { return w.present && !w.discarded }
+
+// Name returns the rule's name.
+func (w Wrapper[T, R]) Name() Name {
+	var rule R
+
+	return rule.Name()
+}
+
+func (w *Wrapper[T, R]) discard() {
+	var zero T
+
+	w.value = zero
+	w.discarded = true
+}
+
+// Discard clears the value and flags the wrapper as discarded.
+func (w *Wrapper[T, R]) Discard() { w.discard() }
+
+// MarshalJSON writes the unwrapped value, or null if discarded. It does not
+// mutate the wrapper.
+func (w Wrapper[T, R]) MarshalJSON() ([]byte, error) {
+	if w.discarded {
+		return []byte("null"), nil
+	}
+
+	return json.Marshal(w.Unwrap())
+}
+
+// UnmarshalJSON decodes and validates in one step. Numbers are decoded as
+// json.Number so integer rules can reject fractional and out-of-range input
+// instead of silently truncating through float64.
+func (w *Wrapper[T, R]) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	var raw any
+	if err := decoder.Decode(&raw); err != nil {
+		w.present = true
+		w.discard()
+
 		return err
 	}
 
-	err := wrapper.Wrap(s, false)
-	return err
+	return w.Wrap(raw)
+}
+
+// IsZero lets `json:",omitzero"` drop absent and discarded fields, which removes
+// the v1 step of nilling the field out by hand to omit it.
+func (w Wrapper[T, R]) IsZero() bool { return !w.present || w.discarded }
+
+// Lenient is a Wrapper that never fails unmarshalling. Invalid input is discarded
+// silently and the caller checks IsValid. It replaces v1's Discarder, with no
+// Proxy field to reach through: the wrapper's own methods are promoted.
+//
+// Lenient is about bad values. Absent fields are a separate axis, handled by the
+// `wrappers:"optional"` tag that Check reads.
+type Lenient[T any, R Rule[T]] struct {
+	Wrapper[T, R]
+}
+
+// UnmarshalJSON decodes into the underlying wrapper and swallows rejection.
+func (o *Lenient[T, R]) UnmarshalJSON(data []byte) error {
+	if err := o.Wrapper.UnmarshalJSON(data); err != nil {
+		o.Wrapper.discard()
+	}
+
+	return nil
 }

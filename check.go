@@ -34,14 +34,31 @@ type checkable interface {
 // reported if present and discarded. Errors are joined, so one call reports every
 // bad field rather than only the first.
 func Check(value any) error {
-	var problems []error
+	c := checker{seen: make(map[visit]bool)}
 
-	walk(reflect.ValueOf(value), "", &problems)
+	c.walk(reflect.ValueOf(value), "")
 
-	return errors.Join(problems...)
+	return errors.Join(c.problems...)
 }
 
-func walk(v reflect.Value, path string, problems *[]error) {
+// visit identifies somewhere the walk has already been. A struct can point back
+// at itself, directly or through a chain, and without this the walk would follow
+// the cycle until the stack ran out.
+type visit struct {
+	pointer uintptr
+	typ     reflect.Type
+}
+
+type checker struct {
+	problems []error
+	seen     map[visit]bool
+}
+
+func (c *checker) report(path string, cause error) {
+	c.problems = append(c.problems, &FieldError{Field: path, Cause: cause})
+}
+
+func (c *checker) walk(v reflect.Value, path string) {
 	if !v.IsValid() {
 		return
 	}
@@ -52,36 +69,45 @@ func walk(v reflect.Value, path string, problems *[]error) {
 			// A nil wrapper pointer is the v1 panic waiting to happen. Report it
 			// rather than letting the caller find it by dereferencing.
 			if path != "" && implementsCheckable(v.Type()) {
-				*problems = append(*problems, &FieldError{Field: path, Cause: ErrMissing})
+				c.report(path, ErrMissing)
 			}
 
 			return
 		}
 
-		walk(v.Elem(), path, problems)
+		if v.Kind() == reflect.Pointer {
+			here := visit{pointer: v.Pointer(), typ: v.Type()}
+			if c.seen[here] {
+				return
+			}
+
+			c.seen[here] = true
+		}
+
+		c.walk(v.Elem(), path)
 
 	case reflect.Struct:
 		// A wrapper is itself a struct, so it has to be tested before descending,
 		// otherwise the walk would recurse into its unexported fields.
-		if inspect(v, path, "", problems) {
+		if c.inspect(v, path, "") {
 			return
 		}
 
-		walkFields(v, path, problems)
+		c.walkFields(v, path)
 
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			walk(v.Index(i), indexPath(path, i), problems)
+			c.walk(v.Index(i), indexPath(path, i))
 		}
 
 	case reflect.Map:
 		for _, key := range v.MapKeys() {
-			walk(v.MapIndex(key), joinPath(path, key.String()), problems)
+			c.walk(v.MapIndex(key), joinPath(path, key.String()))
 		}
 	}
 }
 
-func walkFields(v reflect.Value, path string, problems *[]error) {
+func (c *checker) walkFields(v reflect.Value, path string) {
 	t := v.Type()
 
 	for i := range t.NumField() {
@@ -95,24 +121,24 @@ func walkFields(v reflect.Value, path string, problems *[]error) {
 
 		// Test the field itself before recursing, so a wrapper field is inspected
 		// with its tag in hand rather than as an anonymous struct.
-		if inspect(v.Field(i), child, tag, problems) {
+		if c.inspect(v.Field(i), child, tag) {
 			continue
 		}
 
 		if v.Field(i).Kind() == reflect.Pointer && v.Field(i).IsNil() && implementsCheckable(v.Field(i).Type()) {
 			if tag != TagOptional {
-				*problems = append(*problems, &FieldError{Field: child, Cause: ErrMissing})
+				c.report(child, ErrMissing)
 			}
 
 			continue
 		}
 
-		walk(v.Field(i), child, problems)
+		c.walk(v.Field(i), child)
 	}
 }
 
 // inspect reports a wrapper field and returns whether the value was a wrapper.
-func inspect(v reflect.Value, path string, tag string, problems *[]error) bool {
+func (c *checker) inspect(v reflect.Value, path string, tag string) bool {
 	w, ok := asCheckable(v)
 	if !ok {
 		return false
@@ -121,17 +147,11 @@ func inspect(v reflect.Value, path string, tag string, problems *[]error) bool {
 	switch {
 	case !w.IsPresent():
 		if tag != TagOptional {
-			*problems = append(*problems, &FieldError{
-				Field: path,
-				Cause: &ValidationError{Wrapper: w.Name(), Reason: "absent from input", Cause: ErrMissing},
-			})
+			c.report(path, &ValidationError{Wrapper: w.Name(), Reason: "absent from input", Cause: ErrMissing})
 		}
 
 	case w.IsDiscarded():
-		*problems = append(*problems, &FieldError{
-			Field: path,
-			Cause: &ValidationError{Wrapper: w.Name(), Reason: "value was discarded", Cause: ErrValue},
-		})
+		c.report(path, &ValidationError{Wrapper: w.Name(), Reason: "value was discarded", Cause: ErrValue})
 	}
 
 	return true

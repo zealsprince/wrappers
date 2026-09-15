@@ -56,7 +56,7 @@ func (r Rule[T, V]) Parse(value any) (T, error) {
 		return T(v), nil
 
 	default:
-		return "", wrappers.ErrValuef(r.Name(), value, "expected a string")
+		return "", wrappers.ValueErrorf(r.Name(), value, "expected a string")
 	}
 }
 
@@ -68,7 +68,7 @@ func (r Rule[T, V]) Validate(value T) error {
 		return nil
 	}
 
-	return wrappers.ErrValuef(r.Name(), string(value), "one of %v", permitted)
+	return wrappers.ValueErrorf(r.Name(), string(value), "one of %v", permitted)
 }
 
 // Wrapper is the strict enum wrapper. Invalid input fails the unmarshal.

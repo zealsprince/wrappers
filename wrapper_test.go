@@ -1,1462 +1,282 @@
-package wrappers
+package wrappers_test
 
 import (
 	"encoding/json"
-	"strconv"
-	"strings"
+	"errors"
+	"math"
+	"sync"
 	"testing"
-	"time"
 
-	"github.com/biter777/countries"
+	wrappers "github.com/zealsprince/wrappers/v2"
 )
 
-func TestNew(t *testing.T) {
+// Each test below pins a defect that v1 actually shipped. They are named after
+// the defect so a failure says what regressed rather than which assertion moved.
+
+// v1: w.Wrap("bad", true) then w.Wrap(42, false) left value=42 but Unwrap()=0 and
+// IsDiscarded()=true forever, because nothing ever cleared the flag.
+func TestSuccessfulWrapClearsAnEarlierDiscard(t *testing.T) {
+	var w wrappers.Int
+
+	if w.WrapDiscard("not a number") {
+		t.Fatal("WrapDiscard(\"not a number\") = true, want false")
+	}
+
+	if !w.IsDiscarded() {
+		t.Fatal("IsDiscarded() = false, want true after a rejected value")
+	}
+
+	if err := w.Wrap(42); err != nil {
+		t.Fatalf("Wrap(42) error = %v, want nil", err)
+	}
+
+	if w.IsDiscarded() {
+		t.Error("IsDiscarded() = true, want false after a successful wrap")
+	}
+
+	if got := w.Get(); got != 42 {
+		t.Errorf("Get() = %d, want 42", got)
+	}
+}
+
+// v1 decoded JSON numbers through float64, so {"id":1.9} became 1 and {"id":1e30}
+// became -9223372036854775808. Out-of-range float to int conversion is undefined
+// in Go, not merely lossy, so that second one was garbage rather than truncation.
+func TestIntegerRulesRejectFractionalAndOutOfRange(t *testing.T) {
 	tests := []struct {
-		name    string
-		wrapper WrapperProvider
+		name  string
+		input string
 	}{
-		{
-			name:    "New WrapperBool",
-			wrapper: func() WrapperProvider { return New[*WrapperBool]() }(),
-		},
-		{
-			name:    "New WrapperCountry",
-			wrapper: func() WrapperProvider { return New[*WrapperCountry]() }(),
-		},
-		{
-			name:    "New WrapperFloat",
-			wrapper: func() WrapperProvider { return New[*WrapperFloat]() }(),
-		},
-		{
-			name:    "New WrapperInt",
-			wrapper: func() WrapperProvider { return New[*WrapperInt]() }(),
-		},
-		{
-			name:    "New WrapperString",
-			wrapper: func() WrapperProvider { return New[*WrapperString]() }(),
-		},
-		{
-			name:    "New WrapperTime",
-			wrapper: func() WrapperProvider { return New[*WrapperTime]() }(),
-		},
+		{"fractional", `1.9`},
+		{"overflow", `1e30`},
+		{"negative overflow", `-1e30`},
+		{"far past MaxInt64", `92233720368547758079`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Check if the wrapper is initialized
-			if !tt.wrapper.IsInitialized() {
-				t.Errorf("Wrapper not initialized")
+			var w wrappers.Int
+
+			if err := json.Unmarshal([]byte(tt.input), &w); err == nil {
+				t.Fatalf("Unmarshal(%s) error = nil, want rejection (got %d)", tt.input, w.Get())
 			}
 		})
 	}
 }
 
-func TestNewWithValue(t *testing.T) {
+// Lenient coercion is the reason this library exists, so the fix above must not
+// have tightened the cases that legitimately worked.
+func TestIntegerRulesStillCoerceLooseInput(t *testing.T) {
 	tests := []struct {
-		name    string
-		wrapper WrapperProvider
-		want    any
+		name  string
+		input string
+		want  int64
 	}{
-		{
-			name:    "NewWithValue WrapperBool with true",
-			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperBool](true); return wrapper }(),
-			want:    true,
-		},
-		{
-			name:    "NewWithValue WrapperCountry with CountryCodeUS",
-			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperCountry](countries.US); return wrapper }(),
-			want:    "United States",
-		},
-		{
-			name:    "NewWithValue WrapperFloat with 123.456",
-			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperFloat](123.456); return wrapper }(),
-			want:    123.456,
-		},
-		{
-			name:    "NewWithValue WrapperInt with 100",
-			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperInt](100); return wrapper }(),
-			want:    int64(100),
-		},
-		{
-			name:    "NewWithValue WrapperString with 'Test String'",
-			wrapper: func() WrapperProvider { wrapper, _ := NewWithValue[*WrapperString]("Test String"); return wrapper }(),
-			want:    "Test String",
-		},
-		{
-			name: "NewWithValue WrapperTime with time.Time",
-			wrapper: func() WrapperProvider {
-				wrapper, _ := NewWithValue[*WrapperTime](time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC))
-				return wrapper
-			}(),
-			want: time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC).Format(time.RFC3339),
-		},
+		{"json integer", `42`, 42},
+		{"integral float", `1.0`, 1},
+		{"numeric string", `"42"`, 42},
+		{"negative string", `"-7"`, -7},
+		{"exponent form", `1e3`, 1000},
+		{"MaxInt64", `9223372036854775807`, math.MaxInt64},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Check if the wrapper is initialized
-			if !tt.wrapper.IsInitialized() {
-				t.Errorf("Wrapper not initialized")
+			var w wrappers.Int
+
+			if err := json.Unmarshal([]byte(tt.input), &w); err != nil {
+				t.Fatalf("Unmarshal(%s) error = %v, want nil", tt.input, err)
 			}
 
-			// Check if the wrapped value is correct
-			if tt.wrapper.UnwrapAny() != tt.want {
-				t.Errorf("Wrapped value = %v, want %v", tt.wrapper.UnwrapAny(), tt.want)
+			if got := w.Get(); got != tt.want {
+				t.Errorf("Get() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-// We're going to create a new wrapper type that only accepts positive integers.
-const (
-	wrapperCustomIntPositiveName Name = "WrapperCustomIntPositive"
-)
-
-type wrapperCustomIntPositive struct {
-	WrapperInt
-}
-
-func (wrapper *wrapperCustomIntPositive) handleValue(value int64) error {
-	if value < 0 {
-		wrapper.Discard()
-		return ErrorValue(wrapperCustomIntPositiveName, value, "positive int")
-	} else {
-		wrapper.Value = value
-	}
-
-	return nil
-}
-
-func (wrapper *wrapperCustomIntPositive) Wrap(value any, discard bool) error {
-	switch v := value.(type) {
-	case nil:
-		wrapper.Discard()
-		if !discard {
-			return ErrorNil(WrapperStringName)
-		}
-
-	case WrapperProvider:
-		if v.IsDiscarded() {
-			wrapper.Discard()
-			return nil
-		}
-
-		return wrapper.Wrap(v.UnwrapAny(), discard)
-
-	case string:
-		converted, err := strconv.Atoi(v)
-		if err != nil {
-			wrapper.Discard()
-			if !discard {
-				return ErrorValue(wrapperCustomIntPositiveName, value, "int")
-			}
-		}
-
-		wrapper.handleValue(int64(converted))
-
-	case int:
-		wrapper.handleValue(int64(v))
-
-	case int16:
-		wrapper.handleValue(int64(v))
-
-	case int32:
-		wrapper.handleValue(int64(v))
-
-	case int64:
-		wrapper.handleValue(int64(v))
-	}
-
-	return nil
-}
-
-var _ WrapperProvider = (*WrapperString)(nil) // Ensure that WrapperString implements WrapperProvider.
-
-func TestNewWithValueDiscard(t *testing.T) {
-	tests := []struct {
-		name        string
-		wrapper     WrapperProvider
-		want        any
-		wantDiscard bool
-	}{
-		{
-			name:        "NewWithValueDiscard WrapperBool with true",
-			wrapper:     NewWithValueDiscard[*WrapperBool](true),
-			want:        true,
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperCountry with CountryCodeUS",
-			wrapper:     NewWithValueDiscard[*WrapperCountry](countries.US),
-			want:        "United States",
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperFloat with 123.456",
-			wrapper:     NewWithValueDiscard[*WrapperFloat](123.456),
-			want:        123.456,
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperInt with 100",
-			wrapper:     NewWithValueDiscard[*WrapperInt](100),
-			want:        int64(100),
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperString with 'Test String'",
-			wrapper:     NewWithValueDiscard[*WrapperString]("Test String"),
-			want:        "Test String",
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperTime with time.Time",
-			wrapper:     NewWithValueDiscard[*WrapperTime](time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC)),
-			want:        time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC).Format(time.RFC3339),
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperIntPositive with 100",
-			wrapper:     NewWithValueDiscard[*wrapperCustomIntPositive](100),
-			want:        int64(100),
-			wantDiscard: false,
-		},
-		{
-			name:        "NewWithValueDiscard WrapperIntPositive with -100",
-			wrapper:     NewWithValueDiscard[*wrapperCustomIntPositive](-100),
-			want:        int64(0),
-			wantDiscard: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Check if the wrapper is initialized
-			if !tt.wrapper.IsInitialized() {
-				t.Errorf("Wrapper not initialized")
-			}
-
-			// Check if the wrapped value is discarded
-			if !tt.wrapper.IsDiscarded() && tt.wantDiscard {
-				t.Errorf("Wrapped value is not discarded")
-			}
-
-			if tt.wrapper.UnwrapAny() != tt.want {
-				t.Errorf("Wrapped value = %v, want %v", tt.wrapper.UnwrapAny(), tt.want)
-			}
-		})
-	}
-}
-
-type ExampleNested struct {
-	NestedNumberValue *WrapperInt    `json:"nested_number_value"`
-	NestedStringValue *WrapperString `json:"nested_string_value"`
-}
-
-type ExampleOmit struct {
-	OmitNumberValue *WrapperInt    `json:"omit_number_value,omitempty"`
-	OmitStringValue *WrapperString `json:"omit_string_value,omitempty"`
-}
-
-// ExampleDiscarder holds Discarder types
-type ExampleDiscarder struct {
-	DiscarderNumberValue *Discarder[*WrapperInt] `json:"discarder_number_value"`
-}
-
-// Updated Example struct to include Discarder
-type Example struct {
-	NumberValue *WrapperInt    `json:"number_value"`
-	StringValue *WrapperString `json:"string_value"`
-	BoolValue   *WrapperBool   `json:"bool_value"`
-	FloatValue  *WrapperFloat  `json:"float_value"`
-	TimeValue   *WrapperTime   `json:"time_value"`
-
-	Nested    ExampleNested    `json:"nested"`
-	Omit      *ExampleOmit     `json:"omit,omitempty"`
-	Discarder ExampleDiscarder `json:"discarder"`
-}
-
-// trimJson trims JSON strings of whitespace and newlines for better comparison while keeping them readable.
-func trimJson(jsonStr string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(jsonStr, "\n", ""), "\t", "")
-}
-
-// compareJSON compares two JSON objects represented as interface{}
-func compareJSON(a, b interface{}) bool {
-	switch aTyped := a.(type) {
-	case map[string]interface{}:
-		bTyped, ok := b.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		if len(aTyped) != len(bTyped) {
-			return false
-		}
-		for key, aValue := range aTyped {
-			bValue, exists := bTyped[key]
-			if !exists {
-				return false
-			}
-			if !compareJSON(aValue, bValue) {
-				return false
-			}
-		}
-		return true
-	case []interface{}:
-		bTyped, ok := b.([]interface{})
-		if !ok {
-			return false
-		}
-		if len(aTyped) != len(bTyped) {
-			return false
-		}
-		for i := range aTyped {
-			if !compareJSON(aTyped[i], bTyped[i]) {
-				return false
-			}
-		}
-		return true
-	default:
-		return a == b
-	}
-}
-
-// Helper function to compare two Example structs
-func compareExamples(t *testing.T, original, unmarshalled *Example) {
-	// Compare NumberValue
-	if original.NumberValue != nil && unmarshalled.NumberValue != nil {
-		if original.NumberValue.IsDiscarded() != unmarshalled.NumberValue.IsDiscarded() {
-			t.Errorf("NumberValue discard state mismatch: got %v, want %v",
-				unmarshalled.NumberValue.IsDiscarded(), original.NumberValue.IsDiscarded())
-		}
-		if !original.NumberValue.IsDiscarded() && original.NumberValue.Unwrap() != unmarshalled.NumberValue.Unwrap() {
-			t.Errorf("NumberValue mismatch: got %v, want %v",
-				unmarshalled.NumberValue.Unwrap(), original.NumberValue.Unwrap())
-		}
-	}
-
-	// Compare StringValue
-	if original.StringValue != nil && unmarshalled.StringValue != nil {
-		if original.StringValue.IsDiscarded() != unmarshalled.StringValue.IsDiscarded() {
-			t.Errorf("StringValue discard state mismatch: got %v, want %v",
-				unmarshalled.StringValue.IsDiscarded(), original.StringValue.IsDiscarded())
-		}
-		if !original.StringValue.IsDiscarded() && original.StringValue.Unwrap() != unmarshalled.StringValue.Unwrap() {
-			t.Errorf("StringValue mismatch: got %v, want %v",
-				unmarshalled.StringValue.Unwrap(), original.StringValue.Unwrap())
-		}
-	}
-
-	// Compare BoolValue
-	if original.BoolValue != nil && unmarshalled.BoolValue != nil {
-		if original.BoolValue.IsDiscarded() != unmarshalled.BoolValue.IsDiscarded() {
-			t.Errorf("BoolValue discard state mismatch: got %v, want %v",
-				unmarshalled.BoolValue.IsDiscarded(), original.BoolValue.IsDiscarded())
-		}
-		if !original.BoolValue.IsDiscarded() && original.BoolValue.Unwrap() != unmarshalled.BoolValue.Unwrap() {
-			t.Errorf("BoolValue mismatch: got %v, want %v",
-				unmarshalled.BoolValue.Unwrap(), original.BoolValue.Unwrap())
-		}
-	}
-
-	// Compare FloatValue
-	if original.FloatValue != nil && unmarshalled.FloatValue != nil {
-		if original.FloatValue.IsDiscarded() != unmarshalled.FloatValue.IsDiscarded() {
-			t.Errorf("FloatValue discard state mismatch: got %v, want %v",
-				unmarshalled.FloatValue.IsDiscarded(), original.FloatValue.IsDiscarded())
-		}
-		if !original.FloatValue.IsDiscarded() && original.FloatValue.Unwrap() != unmarshalled.FloatValue.Unwrap() {
-			t.Errorf("FloatValue mismatch: got %v, want %v",
-				unmarshalled.FloatValue.Unwrap(), original.FloatValue.Unwrap())
-		}
-	}
-
-	// Compare TimeValue
-	if original.TimeValue != nil && unmarshalled.TimeValue != nil {
-		if original.TimeValue.IsDiscarded() != unmarshalled.TimeValue.IsDiscarded() {
-			t.Errorf("TimeValue discard state mismatch: got %v, want %v",
-				unmarshalled.TimeValue.IsDiscarded(), original.TimeValue.IsDiscarded())
-		}
-		if !original.TimeValue.IsDiscarded() && original.TimeValue.Unwrap() != (unmarshalled.TimeValue.Unwrap()) {
-			t.Errorf("TimeValue mismatch: got %v, want %v",
-				unmarshalled.TimeValue.Unwrap(), original.TimeValue.Unwrap())
-		}
-	}
-
-	// Compare Nested.NestedNumberValue
-	if original.Nested.NestedNumberValue != nil && unmarshalled.Nested.NestedNumberValue != nil {
-		if original.Nested.NestedNumberValue.IsDiscarded() != unmarshalled.Nested.NestedNumberValue.IsDiscarded() {
-			t.Errorf("Nested.NestedNumberValue discard state mismatch: got %v, want %v",
-				unmarshalled.Nested.NestedNumberValue.IsDiscarded(), original.Nested.NestedNumberValue.IsDiscarded())
-		}
-		if !original.Nested.NestedNumberValue.IsDiscarded() && original.Nested.NestedNumberValue.Unwrap() != unmarshalled.Nested.NestedNumberValue.Unwrap() {
-			t.Errorf("Nested.NestedNumberValue mismatch: got %v, want %v",
-				unmarshalled.Nested.NestedNumberValue.Unwrap(), original.Nested.NestedNumberValue.Unwrap())
-		}
-	}
-
-	// Compare Nested.NestedStringValue
-	if original.Nested.NestedStringValue != nil && unmarshalled.Nested.NestedStringValue != nil {
-		if original.Nested.NestedStringValue.IsDiscarded() != unmarshalled.Nested.NestedStringValue.IsDiscarded() {
-			t.Errorf("Nested.NestedStringValue discard state mismatch: got %v, want %v",
-				unmarshalled.Nested.NestedStringValue.IsDiscarded(), original.Nested.NestedStringValue.IsDiscarded())
-		}
-		if !original.Nested.NestedStringValue.IsDiscarded() && original.Nested.NestedStringValue.Unwrap() != unmarshalled.Nested.NestedStringValue.Unwrap() {
-			t.Errorf("Nested.NestedStringValue mismatch: got %v, want %v",
-				unmarshalled.Nested.NestedStringValue.Unwrap(), original.Nested.NestedStringValue.Unwrap())
-		}
-	}
-
-	// Compare Omit Fields
-	if original.Omit != nil && unmarshalled.Omit != nil {
-		// Compare Omit.OmitNumberValue
-		if original.Omit.OmitNumberValue != nil && unmarshalled.Omit.OmitNumberValue != nil {
-			if original.Omit.OmitNumberValue.IsDiscarded() != unmarshalled.Omit.OmitNumberValue.IsDiscarded() {
-				t.Errorf("Omit.OmitNumberValue discard state mismatch: got %v, want %v",
-					unmarshalled.Omit.OmitNumberValue.IsDiscarded(), original.Omit.OmitNumberValue.IsDiscarded())
-			}
-			if !original.Omit.OmitNumberValue.IsDiscarded() && original.Omit.OmitNumberValue.Unwrap() != unmarshalled.Omit.OmitNumberValue.Unwrap() {
-				t.Errorf("Omit.OmitNumberValue mismatch: got %v, want %v",
-					unmarshalled.Omit.OmitNumberValue.Unwrap(), original.Omit.OmitNumberValue.Unwrap())
-			}
-		}
-
-		// Compare Omit.OmitStringValue
-		if original.Omit.OmitStringValue != nil && unmarshalled.Omit.OmitStringValue != nil {
-			if original.Omit.OmitStringValue.IsDiscarded() != unmarshalled.Omit.OmitStringValue.IsDiscarded() {
-				t.Errorf("Omit.OmitStringValue discard state mismatch: got %v, want %v",
-					unmarshalled.Omit.OmitStringValue.IsDiscarded(), original.Omit.OmitStringValue.IsDiscarded())
-			}
-			if !original.Omit.OmitStringValue.IsDiscarded() && original.Omit.OmitStringValue.Unwrap() != unmarshalled.Omit.OmitStringValue.Unwrap() {
-				t.Errorf("Omit.OmitStringValue mismatch: got %v, want %v",
-					unmarshalled.Omit.OmitStringValue.Unwrap(), original.Omit.OmitStringValue.Unwrap())
-			}
-		}
-	}
-
-	// Compare Discarder Field
-	if original.Discarder.DiscarderNumberValue != nil && unmarshalled.Discarder.DiscarderNumberValue != nil {
-		discarderOriginal := original.Discarder.DiscarderNumberValue
-		discarderUnmarshalled := unmarshalled.Discarder.DiscarderNumberValue
-
-		// Check if the Proxy is nil for both original and unmarshalled Discarder
-		if discarderOriginal.Proxy == nil && discarderUnmarshalled.Proxy == nil {
-			// Check discard state
-			if discarderOriginal.Proxy.IsDiscarded() != discarderUnmarshalled.Proxy.IsDiscarded() {
-				t.Errorf("Discarder.DiscarderNumberValue discard state mismatch: got %v, want %v",
-					discarderUnmarshalled.Proxy.IsDiscarded(), discarderOriginal.Proxy.IsDiscarded())
-			}
-
-			// Check unwrapped value
-			if !discarderOriginal.Proxy.IsDiscarded() {
-				originalVal := discarderOriginal.Proxy.UnwrapAny()
-				unmarshalledVal := discarderUnmarshalled.Proxy.UnwrapAny()
-				if originalVal != unmarshalledVal {
-					t.Errorf("Discarder.DiscarderNumberValue mismatch: got %v, want %v",
-						unmarshalledVal, originalVal)
-				}
-			}
-		}
-	}
-}
-
-// Helper function to initialize an Example struct with valid data
-func initializeValidExample() *Example {
-	example := &Example{
-		NumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap(100, false)
-			return w
-		}(),
-		StringValue: func() *WrapperString {
-			w := New[*WrapperString]()
-			w.Wrap("Test String", false)
-			return w
-		}(),
-		BoolValue: func() *WrapperBool {
-			w := New[*WrapperBool]()
-			w.Wrap(true, false)
-			return w
-		}(),
-		FloatValue: func() *WrapperFloat {
-			w := New[*WrapperFloat]()
-			w.Wrap(123.456, false)
-			return w
-		}(),
-		TimeValue: func() *WrapperTime {
-			w := New[*WrapperTime]()
-			w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC), false)
-			return w
-		}(),
-	}
-
-	// Initialize Nested struct with valid data
-	example.Nested.NestedNumberValue = func() *WrapperInt {
-		w := New[*WrapperInt]()
-		w.Wrap(200, false)
-		return w
-	}()
-
-	example.Nested.NestedStringValue = func() *WrapperString {
-		w := New[*WrapperString]()
-		w.Wrap("Nested String", false)
-		return w
-	}()
-
-	// Initialize Omit struct with valid data
-	example.Omit = &ExampleOmit{
-		OmitNumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap(300, false)
-			return w
-		}(),
-		OmitStringValue: func() *WrapperString {
-			w := New[*WrapperString]()
-			w.Wrap("Omit String", false)
-			return w
-		}(),
-	}
-
-	// Initialize Discarder with valid data
-	discarderWrapper := New[*WrapperInt]()
-	discarderWrapper.Wrap(400, false) // Valid value
-	example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-	return example
-}
-
-// Helper function to initialize an Example struct with some invalid and discarded fields
-func initializeExampleWithDiscards() *Example {
-	example := &Example{
-		NumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap("invalid_int", true) // Invalid int with discard=true
-			return w
-		}(),
-		StringValue: func() *WrapperString {
-			w := New[*WrapperString]()
-			w.Wrap("Valid String", false)
-			return w
-		}(),
-		BoolValue: func() *WrapperBool {
-			w := New[*WrapperBool]()
-			w.Wrap("yes", false) // Valid boolean representation
-			return w
-		}(),
-		FloatValue: func() *WrapperFloat {
-			w := New[*WrapperFloat]()
-			w.Wrap("invalid_float", true) // Invalid float with discard=true
-			return w
-		}(),
-		TimeValue: func() *WrapperTime {
-			w := New[*WrapperTime]()
-			w.Wrap("invalid_time_format", true) // Invalid time with discard=true
-			return w
-		}(),
-	}
-
-	// Initialize Nested struct with some invalid data
-	example.Nested.NestedNumberValue = func() *WrapperInt {
-		w := New[*WrapperInt]()
-		w.Wrap(500, false)
-		return w
-	}()
-
-	example.Nested.NestedStringValue = func() *WrapperString {
-		w := New[*WrapperString]()
-		w.Wrap("Nested Valid String", false)
-		return w
-	}()
-
-	// Initialize Omit struct with some invalid data
-	example.Omit = &ExampleOmit{
-		OmitNumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap("invalid_omit_int", true) // Invalid int with discard=true
-			return w
-		}(),
-		// OmitStringValue left as nil to test omitempty
-	}
-
-	// Initialize Discarder with invalid data
-	discarderWrapper := New[*WrapperInt]()
-	discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-	example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-	return example
-}
-
-// TestMarshallingAndUnmarshalling tests marshalling and unmarshalling of the Example struct, including Discarder.
-func TestMarshallingAndUnmarshalling(t *testing.T) {
-	tests := []struct {
-		name           string
-		initialExample *Example
-		expectedJSON   string
-	}{
-		{
-			name:           "All Fields Valid",
-			initialExample: initializeValidExample(),
-			expectedJSON: trimJson(`{
-				"number_value":100,
-				"string_value":"Test String",
-				"bool_value":true,
-				"float_value":123.456,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":200,
-					"nested_string_value":"Nested String"
-				},
-				"omit":{
-					"omit_number_value":300,
-					"omit_string_value":"Omit String"
-				},
-				"discarder":{
-					"discarder_number_value":400
-				}
-			}`),
-		},
-		{
-			name:           "Some Fields Invalid and Discarded",
-			initialExample: initializeExampleWithDiscards(),
-			expectedJSON: trimJson(`{
-				"number_value":null,
-				"string_value":"Valid String",
-				"bool_value":true,
-				"float_value":null,
-				"time_value":null,
-				"nested":{
-					"nested_number_value":500,
-					"nested_string_value":"Nested Valid String"
-				},
-				"omit":{
-					"omit_number_value":null
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-		{
-			name: "Omit Struct Completely (All Omit Fields Nil)",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(50, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Another Test String", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(false, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(789.012, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(600, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Complete String", false)
-					return w
-				}()
-
-				// Omit struct fields left as nil to test omitempty
-				// Initialize Discarder with valid data
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap(700, false) // Valid value
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":50,
-				"string_value":"Another Test String",
-				"bool_value":false,
-				"float_value":789.012,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":600,
-					"nested_string_value":"Nested Complete String"
-				},
-				"discarder":{
-					"discarder_number_value":700
-				}
-			}`),
-		},
-		{
-			name: "Discarder Discards Invalid Value",
-			initialExample: func() *Example {
-				example := initializeValidExample()
-				// Overwrite Discarder with invalid data
-				example.Discarder.DiscarderNumberValue.Proxy.Wrap("invalid_discarder_int", true)
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":100,
-				"string_value":"Test String",
-				"bool_value":true,
-				"float_value":123.456,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":200,
-					"nested_string_value":"Nested String"
-				},
-				"omit":{
-					"omit_number_value":300,
-					"omit_string_value":"Omit String"
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Marshal the initialExample to JSON
-			jsonData, err := json.Marshal(tt.initialExample)
-			if err != nil {
-				t.Fatalf("Failed to marshal Example struct: %v", err)
-			}
-
-			// For better comparison, unmarshal both expectedJSON and actual jsonData into interface{}
-			var expected interface{}
-			err = json.Unmarshal([]byte(tt.expectedJSON), &expected)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal expected JSON: %v", err)
-			}
-
-			var actual interface{}
-			err = json.Unmarshal(jsonData, &actual)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal actual JSON: %v", err)
-			}
-
-			// Compare the two unmarshalled interfaces
-			if !compareJSON(expected, actual) {
-				t.Errorf("Marshalled JSON mismatch.\nExpected: %v\nActual:   %v", tt.expectedJSON, string(jsonData))
-			}
-
-			// Now unmarshal jsonData back into a new Example struct
-			var unmarshalled Example
-			err = json.Unmarshal(jsonData, &unmarshalled)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal JSON back into Example struct: %v", err)
-			}
-
-			// Compare the initialExample and unmarshalled Example structs
-			compareExamples(t, tt.initialExample, &unmarshalled)
-		})
-	}
-}
-
-// TestMarshallingWithOmitFields tests marshalling of Example structs where omit fields are nil or discarded, including Discarder.
-func TestMarshallingWithOmitFields(t *testing.T) {
-	tests := []struct {
-		name           string
-		initialExample *Example
-		expectedJSON   string
-	}{
-		{
-			name: "Omit Struct with All Omit Fields Set",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(10, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Sample String", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(true, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(99.99, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(20, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Valid String", false)
-					return w
-				}()
-
-				// Initialize Omit struct with all fields set
-				example.Omit = &ExampleOmit{
-					OmitNumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(30, false)
-						return w
-					}(),
-					OmitStringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Omit Valid String", false)
-						return w
-					}(),
-				}
-
-				// Initialize Discarder with valid data
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap(40, false) // Valid value
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":10,
-				"string_value":"Sample String",
-				"bool_value":true,
-				"float_value":99.99,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":20,
-					"nested_string_value":"Nested Valid String"
-				},
-				"omit":{
-					"omit_number_value":30,
-					"omit_string_value":"Omit Valid String"
-				},
-				"discarder":{
-					"discarder_number_value":40
-				}
-			}`),
-		},
-		{
-			name: "Omit Struct with Some Omit Fields Discarded",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(15, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Another String", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(false, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(50.5, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 685, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with some invalid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap("invalid_nested_int", true) // Invalid int with discard=true
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Another String", false)
-					return w
-				}()
-
-				// Initialize Omit struct with some fields discarded
-				example.Omit = &ExampleOmit{
-					OmitNumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap("invalid_omit_int", true) // Invalid int with discard=true
-						return w
-					}(),
-					// OmitStringValue left as nil to test omitempty
-				}
-
-				// Initialize Discarder with invalid data
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: `{
-				"number_value":15,
-				"string_value":"Another String",
-				"bool_value":false,
-				"float_value":50.5,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":null,
-					"nested_string_value":"Nested Another String"
-				},
-				"omit":{
-					"omit_number_value":null
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`,
-		},
-		{
-			name: "Omit Struct Fully Omitted (All Omit Fields Discarded)",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(12, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Full Omit Test", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(false, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(88.88, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 0, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(24, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Full Omit Test", false)
-					return w
-				}()
-
-				// Initialize Omit struct with all fields discarded
-				example.Omit = &ExampleOmit{
-					OmitNumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap("invalid_omit_int", true) // Invalid int with discard=true
-						return w
-					}(),
-					OmitStringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap(nil, true) // Invalid string with discard=true
-						return w
-					}(),
-				}
-
-				// Initialize Discarder with invalid data
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":12,
-				"string_value":"Full Omit Test",
-				"bool_value":false,
-				"float_value":88.88,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":24,
-					"nested_string_value":"Nested Full Omit Test"
-				},
-				"omit":{
-					"omit_number_value":null,
-					"omit_string_value":null
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Marshal the initialExample to JSON
-			jsonData, err := json.Marshal(tt.initialExample)
-			if err != nil {
-				t.Fatalf("Failed to marshal Example struct: %v", err)
-			}
-
-			// Unmarshal both expectedJSON and actual jsonData into interface{}
-			var expected interface{}
-			err = json.Unmarshal([]byte(tt.expectedJSON), &expected)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal expected JSON: %v", err)
-			}
-
-			var actual interface{}
-			err = json.Unmarshal(jsonData, &actual)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal actual JSON: %v", err)
-			}
-
-			// Compare the two unmarshalled interfaces
-			if !compareJSON(expected, actual) {
-				t.Errorf("Marshalled JSON mismatch.\nExpected: %v\nActual:   %v", tt.expectedJSON, string(jsonData))
-			}
-
-			// Now unmarshal jsonData back into a new Example struct
-			var unmarshalled Example
-			err = json.Unmarshal(jsonData, &unmarshalled)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal JSON back into Example struct: %v", err)
-			}
-
-			// Compare the initialExample and unmarshalled Example structs
-			compareExamples(t, tt.initialExample, &unmarshalled)
-		})
-	}
-}
-
-// TestOmitFieldsOmittedWhenNilOrDiscarded tests that fields with omitempty are correctly omitted from JSON when nil or discarded, including Discarder.
-func TestOmitFieldsOmittedWhenNilOrDiscarded(t *testing.T) {
-	tests := []struct {
-		name           string
-		initialExample *Example
-		expectedJSON   string
-	}{
-		{
-			name: "Omit Struct Completely (All Omit Fields Nil)",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(5, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Omit Test", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(false, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(55.55, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 0, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(10, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Omit Test", false)
-					return w
-				}()
-
-				// Omit struct left with nil fields to test omitempty
-
-				// Initialize Discarder with discarded value
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap(nil, true) // Invalid value, should be discarded
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":5,
-				"string_value":"Omit Test",
-				"bool_value":false,
-				"float_value":55.55,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":10,
-					"nested_string_value":"Nested Omit Test"
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-		{
-			name: "Omit Struct Partially Omitted (One Omit Field Set)",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(7, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Partial Omit Test", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(true, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(77.77, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 0, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(14, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Partial Omit Test", false)
-					return w
-				}()
-
-				// Initialize Omit struct with only OmitNumberValue set
-				example.Omit = &ExampleOmit{
-					OmitNumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(21, false)
-						return w
-					}(),
-				}
-
-				// Initialize Discarder with discarded value
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":7,
-				"string_value":"Partial Omit Test",
-				"bool_value":true,
-				"float_value":77.77,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":14,
-					"nested_string_value":"Nested Partial Omit Test"
-				},
-				"omit":{
-					"omit_number_value":21
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-		{
-			name: "Omit Struct Fully Omitted (All Omit Fields Discarded)",
-			initialExample: func() *Example {
-				example := &Example{
-					NumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap(12, false)
-						return w
-					}(),
-					StringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap("Full Omit Test", false)
-						return w
-					}(),
-					BoolValue: func() *WrapperBool {
-						w := New[*WrapperBool]()
-						w.Wrap(false, false)
-						return w
-					}(),
-					FloatValue: func() *WrapperFloat {
-						w := New[*WrapperFloat]()
-						w.Wrap(88.88, false)
-						return w
-					}(),
-					TimeValue: func() *WrapperTime {
-						w := New[*WrapperTime]()
-						w.Wrap(time.Date(2025, 1, 16, 6, 34, 8, 0, time.UTC), false)
-						return w
-					}(),
-				}
-
-				// Initialize Nested struct with valid data
-				example.Nested.NestedNumberValue = func() *WrapperInt {
-					w := New[*WrapperInt]()
-					w.Wrap(24, false)
-					return w
-				}()
-
-				example.Nested.NestedStringValue = func() *WrapperString {
-					w := New[*WrapperString]()
-					w.Wrap("Nested Full Omit Test", false)
-					return w
-				}()
-
-				// Initialize Omit struct with all fields discarded
-				example.Omit = &ExampleOmit{
-					OmitNumberValue: func() *WrapperInt {
-						w := New[*WrapperInt]()
-						w.Wrap("invalid_omit_int", true) // Invalid int with discard=true
-						return w
-					}(),
-					OmitStringValue: func() *WrapperString {
-						w := New[*WrapperString]()
-						w.Wrap(nil, true) // Invalid string with discard=true
-						return w
-					}(),
-				}
-
-				// Initialize Discarder with invalid data
-				discarderWrapper := New[*WrapperInt]()
-				discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-				example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-				return example
-			}(),
-			expectedJSON: trimJson(`{
-				"number_value":12,
-				"string_value":"Full Omit Test",
-				"bool_value":false,
-				"float_value":88.88,
-				"time_value":"2025-01-16T06:34:08Z",
-				"nested":{
-					"nested_number_value":24,
-					"nested_string_value":"Nested Full Omit Test"
-				},
-				"omit":{
-					"omit_number_value":null,
-					"omit_string_value":null
-				},
-				"discarder":{
-					"discarder_number_value":null
-				}
-			}`),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Marshal the initialExample to JSON
-			jsonData, err := json.Marshal(tt.initialExample)
-			if err != nil {
-				t.Fatalf("Failed to marshal Example struct: %v", err)
-			}
-
-			// Unmarshal both expectedJSON and actual jsonData into interface{}
-			var expected interface{}
-			err = json.Unmarshal([]byte(tt.expectedJSON), &expected)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal expected JSON: %v", err)
-			}
-
-			var actual interface{}
-			err = json.Unmarshal(jsonData, &actual)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal actual JSON: %v", err)
-			}
-
-			// Compare the two unmarshalled interfaces
-			if !compareJSON(expected, actual) {
-				t.Errorf("Marshalled JSON mismatch.\nExpected: %v\nActual:   %v", tt.expectedJSON, string(jsonData))
-			}
-
-			// Now unmarshal jsonData back into a new Example struct
-			var unmarshalled Example
-			err = json.Unmarshal(jsonData, &unmarshalled)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal JSON back into Example struct: %v", err)
-			}
-
-			// Compare the initialExample and unmarshalled Example structs
-			compareExamples(t, tt.initialExample, &unmarshalled)
-		})
-	}
-}
-
-// TestExample_FullyDiscardedFields tests marshalling and unmarshalling when all fields are discarded, including Discarder.
-func TestExample_FullyDiscardedFields(t *testing.T) {
-	example := &Example{
-		NumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap("invalid_int", true) // Discarded
-			return w
-		}(),
-		StringValue: func() *WrapperString {
-			w := New[*WrapperString]()
-			w.Wrap(12345, false)
-			return w
-		}(),
-		BoolValue: func() *WrapperBool {
-			w := New[*WrapperBool]()
-			w.Wrap("no", false)
-			return w
-		}(),
-		FloatValue: func() *WrapperFloat {
-			w := New[*WrapperFloat]()
-			w.Wrap("invalid_float", true) // Discarded
-			return w
-		}(),
-		TimeValue: func() *WrapperTime {
-			w := New[*WrapperTime]()
-			w.Wrap("invalid_time_format", true) // Discarded
-			return w
-		}(),
-	}
-
-	// Initialize Nested struct with all fields discarded
-	example.Nested.NestedNumberValue = func() *WrapperInt {
-		w := New[*WrapperInt]()
-		w.Wrap("invalid_nested_int", true) // Discarded
-		return w
-	}()
-
-	example.Nested.NestedStringValue = func() *WrapperString {
-		w := New[*WrapperString]()
-		w.Wrap(nil, true) // Discarded
-		return w
-	}()
-
-	// Initialize Omit struct with all fields discarded
-	example.Omit = &ExampleOmit{
-		OmitNumberValue: func() *WrapperInt {
-			w := New[*WrapperInt]()
-			w.Wrap("invalid_omit_int", true) // Discarded
-			return w
-		}(),
-		OmitStringValue: func() *WrapperString {
-			w := New[*WrapperString]()
-			w.Wrap(nil, true) // Discarded
-			return w
-		}(),
-	}
-
-	// Initialize Discarder with invalid data
-	discarderWrapper := New[*WrapperInt]()
-	discarderWrapper.Wrap("invalid_discarder_int", true) // Invalid int, should be discarded
-	example.Discarder.DiscarderNumberValue = NewDiscarder(discarderWrapper)
-
-	// Marshal to JSON
-	jsonData, err := json.Marshal(example)
+// v1's NewWithValue was typed on the wrapped type, so NewWithValue[*WrapperInt]("1")
+// did not compile even though Wrap("1", false) worked. The constructor and the
+// wrap path now accept the same input.
+func TestConstructorAcceptsTheSameLooseInputAsWrap(t *testing.T) {
+	w, err := wrappers.Of[wrappers.Int]("1")
 	if err != nil {
-		t.Fatalf("Failed to marshal Example struct with fully discarded fields: %v", err)
+		t.Fatalf("Of(\"1\") error = %v, want nil", err)
 	}
 
-	// Expected JSON:
-	expectedJSON := `{
-		"number_value":null,
-		"string_value":"12345",
-		"bool_value":false,
-		"float_value":null,
-		"time_value":null,
-		"nested":{
-			"nested_number_value":null,
-			"nested_string_value":null
-		},
-		"omit":{
-			"omit_number_value":null,
-			"omit_string_value":null
-		},
-		"discarder":{
-			"discarder_number_value":null
-		}
-	}`
+	if got := w.Get(); got != 1 {
+		t.Errorf("Get() = %d, want 1", got)
+	}
+}
 
-	// Unmarshal both expectedJSON and actual jsonData into interface{}
-	var expected interface{}
-	err = json.Unmarshal([]byte(expectedJSON), &expected)
+// v1's NewWithValueDiscard returned the zero T on error, so an invalid value gave
+// back a nil pointer and the first method call panicked.
+func TestOfDiscardAlwaysReturnsAUsableWrapper(t *testing.T) {
+	w := wrappers.OfDiscard[wrappers.NonEmptyString]("")
+
+	if !w.IsDiscarded() {
+		t.Error("IsDiscarded() = false, want true for a rejected value")
+	}
+
+	if w.IsValid() {
+		t.Error("IsValid() = true, want false")
+	}
+
+	// Would have panicked on v1's nil pointer.
+	if got := w.Get(); got != "" {
+		t.Errorf("Get() = %q, want the empty default", got)
+	}
+}
+
+// v1 required every field to be a pointer, so an absent field stayed nil, produced
+// no error, and panicked on Unwrap. The zero wrapper now reads safely.
+func TestZeroWrapperIsUsable(t *testing.T) {
+	var w wrappers.String
+
+	if w.IsPresent() {
+		t.Error("IsPresent() = true, want false on a zero wrapper")
+	}
+
+	if w.IsValid() {
+		t.Error("IsValid() = true, want false on a zero wrapper")
+	}
+
+	if got := w.Get(); got != "" {
+		t.Errorf("Get() = %q, want the empty default", got)
+	}
+}
+
+// v1 lazily wrote the initialized flag inside MarshalJSON, so marshalling one
+// wrapper from several goroutines raced. Run this with -race.
+func TestMarshalDoesNotMutate(t *testing.T) {
+	w := wrappers.MustOf[wrappers.String]("value")
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			if _, err := json.Marshal(w); err != nil {
+				t.Errorf("Marshal() error = %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestNestedWrappers(t *testing.T) {
+	inner := wrappers.MustOf[wrappers.Int](42)
+
+	var outer wrappers.String
+	if err := outer.Wrap(inner); err != nil {
+		t.Fatalf("Wrap(inner) error = %v, want nil", err)
+	}
+
+	if got := outer.Get(); got != "42" {
+		t.Errorf("Get() = %q, want %q", got, "42")
+	}
+}
+
+// A discarded wrapper handed to another wrapper propagates the discard rather
+// than quietly contributing its zero value.
+func TestNestedDiscardPropagates(t *testing.T) {
+	inner := wrappers.OfDiscard[wrappers.Int]("not a number")
+
+	var outer wrappers.String
+	if err := outer.Wrap(inner); err != nil {
+		t.Fatalf("Wrap(discarded) error = %v, want nil", err)
+	}
+
+	if !outer.IsDiscarded() {
+		t.Error("IsDiscarded() = false, want the discard to propagate")
+	}
+}
+
+func TestNullDiscardsAndReportsErrNil(t *testing.T) {
+	var w wrappers.String
+
+	err := json.Unmarshal([]byte(`null`), &w)
+	if err == nil {
+		t.Fatal("Unmarshal(null) error = nil, want ErrNil")
+	}
+
+	if !errors.Is(err, wrappers.ErrNil) {
+		t.Errorf("errors.Is(err, ErrNil) = false, want true (got %v)", err)
+	}
+
+	if !w.IsDiscarded() {
+		t.Error("IsDiscarded() = false, want true after null")
+	}
+}
+
+func TestLenientSwallowsWhatWrapperRejects(t *testing.T) {
+	strict := struct {
+		Value wrappers.Int `json:"value"`
+	}{}
+
+	if err := json.Unmarshal([]byte(`{"value":"nope"}`), &strict); err == nil {
+		t.Error("strict Unmarshal() error = nil, want a rejection")
+	}
+
+	lenient := struct {
+		Value wrappers.LenientInt `json:"value"`
+	}{}
+
+	if err := json.Unmarshal([]byte(`{"value":"nope"}`), &lenient); err != nil {
+		t.Errorf("lenient Unmarshal() error = %v, want nil", err)
+	}
+
+	if lenient.Value.IsValid() {
+		t.Error("IsValid() = true, want false after a discarded value")
+	}
+}
+
+func TestRoundTripPreservesPayload(t *testing.T) {
+	type record struct {
+		Name  wrappers.NonEmptyString `json:"name"`
+		Count wrappers.Int            `json:"count"`
+		Ratio wrappers.Float          `json:"ratio"`
+		Fresh wrappers.Bool           `json:"fresh"`
+	}
+
+	input := `{"name":"andrew","count":3,"ratio":1.5,"fresh":true}`
+
+	var data record
+	if err := json.Unmarshal([]byte(input), &data); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	out, err := json.Marshal(data)
 	if err != nil {
-		t.Fatalf("Failed to unmarshal expected JSON: %v", err)
+		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	var actual interface{}
-	err = json.Unmarshal(jsonData, &actual)
+	if string(out) != input {
+		t.Errorf("round trip changed the payload:\n got %s\nwant %s", out, input)
+	}
+}
+
+// omitzero replaces v1's instruction to nil the field out by hand before marshalling.
+func TestOmitZeroDropsAbsentAndDiscardedFields(t *testing.T) {
+	type record struct {
+		Name wrappers.String `json:"name"`
+		Note wrappers.String `json:"note,omitzero"`
+	}
+
+	var data record
+	if err := json.Unmarshal([]byte(`{"name":"andrew"}`), &data); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	out, err := json.Marshal(data)
 	if err != nil {
-		t.Fatalf("Failed to unmarshal actual JSON: %v", err)
+		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	// Compare the two unmarshalled interfaces
-	if !compareJSON(expected, actual) {
-		t.Errorf("Marshalled JSON mismatch.\nExpected: %v\nActual:   %v", expectedJSON, string(jsonData))
+	if string(out) != `{"name":"andrew"}` {
+		t.Errorf("Marshal() = %s, want the absent field omitted", out)
 	}
-
-	// Now unmarshal jsonData back into a new Example struct
-	var unmarshalled Example
-	err = json.Unmarshal(jsonData, &unmarshalled)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal JSON back into Example struct: %v", err)
-	}
-
-	// Compare each field to ensure they're correctly discarded or unmarshalled
-	compareExamples(t, example, &unmarshalled)
 }

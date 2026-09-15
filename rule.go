@@ -69,7 +69,7 @@ func (Int64Parser) Parse(value any) (int64, error) {
 
 	case uint64:
 		if v > math.MaxInt64 {
-			return 0, ErrValuef("", v, "exceeds int64")
+			return 0, ValueErrorf("", v, "exceeds int64")
 		}
 
 		return int64(v), nil
@@ -115,7 +115,7 @@ func parseIntString(s string) (int64, error) {
 	// back to the float path rather than rejecting it outright.
 	f, ferr := strconv.ParseFloat(s, 64)
 	if ferr != nil {
-		return 0, ErrValuef("", s, "not an integer")
+		return 0, ValueErrorf("", s, "not an integer")
 	}
 
 	return floatToInt(f)
@@ -123,17 +123,17 @@ func parseIntString(s string) (int64, error) {
 
 func floatToInt(f float64) (int64, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, ErrValuef("", f, "not a finite number")
+		return 0, ValueErrorf("", f, "not a finite number")
 	}
 
 	if f != math.Trunc(f) {
-		return 0, ErrValuef("", f, "has a fractional part")
+		return 0, ValueErrorf("", f, "has a fractional part")
 	}
 
 	// The bounds are checked before conversion because float-to-int conversion of
 	// an out-of-range value is undefined in Go, not merely lossy.
 	if f < math.MinInt64 || f >= math.MaxInt64 {
-		return 0, ErrValuef("", f, "exceeds int64")
+		return 0, ValueErrorf("", f, "exceeds int64")
 	}
 
 	return int64(f), nil
@@ -169,11 +169,11 @@ func (Float64Parser) Validate(float64) error { return nil }
 func parseFloatString(s string) (float64, error) {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return 0, ErrValuef("", s, "not a number")
+		return 0, ValueErrorf("", s, "not a number")
 	}
 
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, ErrValuef("", s, "not a finite number")
+		return 0, ValueErrorf("", s, "not a finite number")
 	}
 
 	return f, nil
@@ -191,7 +191,7 @@ func (BoolParser) Parse(value any) (bool, error) {
 	case string:
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return false, ErrValuef("", v, "not a boolean")
+			return false, ValueErrorf("", v, "not a boolean")
 		}
 
 		return b, nil

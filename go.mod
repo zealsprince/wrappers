@@ -1,4 +1,4 @@
-module github.com/zealsprince/wrappers
+module github.com/zealsprince/wrappers/v2
 
 go 1.24.1
 

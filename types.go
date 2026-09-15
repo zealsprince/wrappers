@@ -15,7 +15,7 @@ func (nonEmptyStringRule) Name() Name { return "NonEmptyString" }
 
 func (r nonEmptyStringRule) Validate(s string) error {
 	if s == "" {
-		return ErrValuef(r.Name(), s, "must not be empty")
+		return ValueErrorf(r.Name(), s, "must not be empty")
 	}
 
 	return nil

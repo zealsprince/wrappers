@@ -33,7 +33,7 @@ func match(re *regexp.Regexp, name wrappers.Name, value, expected string) error 
 		return nil
 	}
 
-	return wrappers.ErrValuef(name, value, "expected %s", expected)
+	return wrappers.ValueErrorf(name, value, "expected %s", expected)
 }
 
 type emailRule struct{ wrappers.StringParser }
